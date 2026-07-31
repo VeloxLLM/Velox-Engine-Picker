@@ -4,7 +4,7 @@ export type CpuArch = "X86_64" | "Aarch64" | "Arm" | "X86" | "Other";
 export type CpuBrand = "Intel" | "Amd" | "Apple" | "Qualcomm" | "Other";
 export type GpuVendor = "Nvidia" | "Amd" | "Intel" | "Apple" | "Qualcomm" | "Microsoft" | "Other";
 export type GpuType = "Discrete" | "Integrated" | "Other";
-export type GpuBackend = "Vulkan" | "Metal" | "Dx12" | "Dx11" | "Gl" | "BrowserWebGpu" | "Other";
+export type GpuBackend = "Vulkan" | "Metal" | "Dx12" | "Gl" | "BrowserWebGpu" | "Other";
 
 export type InferenceEngine =
   | "OpenVino"
@@ -28,9 +28,11 @@ export interface CpuInfo {
   name: string;
   vendor: string;
   core_count: number;
+  logical_processor_count: number;
   frequency: number;
   brand: CpuBrand;
   arch: CpuArch;
+  instruction_sets: string[];
 }
 
 export interface MemoryInfo {
@@ -51,6 +53,47 @@ export interface HardwareInfo {
   cpu: CpuInfo;
   memory: MemoryInfo;
   gpus: GpuInfo[];
+  platform: PlatformInfo;
+  availability: EngineAvailability[];
+  detection_warnings: string[];
+}
+
+export type OnlineModelSource = "Ollama" | "LmStudio";
+export type ModelFit = "Gpu" | "Hybrid" | "Cpu";
+
+export interface OnlineModelInfo {
+  name: string;
+  source: OnlineModelSource;
+  parameter_label: string;
+  estimated_q4_gb: number;
+  fit: ModelFit;
+  fit_reason: string;
+  url: string;
+}
+
+export interface OnlineModelCatalog {
+  models: OnlineModelInfo[];
+  warnings: string[];
+}
+
+export interface PlatformInfo {
+  os: string;
+  arch: string;
+  edition: string;
+  support_level: "Stable" | "Experimental" | string;
+}
+
+export type AvailabilityStatus =
+  | "Ready"
+  | "CompatibleMissingRuntime"
+  | "Unsupported"
+  | "Unknown";
+
+export interface EngineAvailability {
+  target: EngineBackendPair;
+  status: AvailabilityStatus;
+  version: string | null;
+  evidence: string;
 }
 
 export interface EngineBackendPair {
@@ -60,12 +103,17 @@ export interface EngineBackendPair {
 
 export interface EngineRecommendation {
   primary: EngineBackendPair;
+  theoretical_primary: EngineBackendPair;
+  ready_primary: EngineBackendPair | null;
   alternatives: EngineBackendPair[];
   reasons: string[];
+  warnings: string[];
   memory_tip: string | null;
+  session_id: string;
+  session_ts: number;
 }
 
-// 帮组函数：引擎/后端显示名
+// 辅助函数：引擎/后端显示名
 export const ENGINE_NAMES: Record<InferenceEngine, string> = {
   OpenVino: "OpenVINO",
   LlamaCpp: "llama.cpp",

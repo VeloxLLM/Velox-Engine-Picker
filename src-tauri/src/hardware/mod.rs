@@ -5,54 +5,63 @@
 pub mod cpu;
 pub mod gpu;
 pub mod memory;
+pub mod models;
+pub mod platform;
+pub mod runtime;
 
-pub use cpu::{collect_cpu_info, CpuArch, CpuBrand, CpuInfo};
+#[cfg(test)]
+pub use cpu::CpuBrand;
+pub use cpu::{collect_cpu_info, CpuArch, CpuInfo};
 pub use gpu::{collect_gpu_info, GpuBackend, GpuInfo, GpuType, GpuVendor};
 pub use memory::{collect_memory_info, MemoryInfo};
+pub use models::{collect_online_models, OnlineModelCatalog};
+pub use platform::{collect_platform_info, PlatformInfo};
+pub use runtime::collect_runtime_availability;
 
-use serde::Serialize;
+use crate::engine::types::EngineAvailability;
+
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// 汇总的硬件信息
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HardwareInfo {
     pub cpu: CpuInfo,
     pub memory: MemoryInfo,
     pub gpus: Vec<GpuInfo>,
+    pub platform: PlatformInfo,
+    pub availability: Vec<EngineAvailability>,
+    pub detection_warnings: Vec<String>,
 }
 
 impl HardwareInfo {
     /// 采集所有硬件信息
     pub fn collect() -> Self {
-        Self {
-            cpu: collect_cpu_info(),
-            memory: collect_memory_info(),
-            gpus: collect_gpu_info(),
-        }
-    }
-
-    /// 是否检测到独立显卡
-    pub fn has_discrete_gpu(&self) -> bool {
-        self.gpus.iter().any(|g| g.gpu_type == GpuType::Discrete)
-    }
-
-    /// 是否检测到 Intel 显卡（集显或 Arc 独显）
-    pub fn has_intel_gpu(&self) -> bool {
-        self.gpus.iter().any(|g| g.vendor == GpuVendor::Intel)
-    }
-
-    /// 是否检测到 NVIDIA 独立显卡
-    pub fn has_nvidia_discrete(&self) -> bool {
-        self.gpus
-            .iter()
-            .any(|g| g.vendor == GpuVendor::Nvidia && g.gpu_type == GpuType::Discrete)
-    }
-
-    /// 是否检测到 AMD 独立显卡
-    pub fn has_amd_discrete(&self) -> bool {
-        self.gpus
-            .iter()
-            .any(|g| g.vendor == GpuVendor::Amd && g.gpu_type == GpuType::Discrete)
+        log::info!("开始硬件检测...");
+        let mut sys = sysinfo::System::new();
+        sys.refresh_all();
+        let cpu = collect_cpu_info(&sys);
+        let gpu_result = collect_gpu_info();
+        let gpus = gpu_result.gpus;
+        let memory = collect_memory_info(&sys);
+        let platform = collect_platform_info();
+        let availability = collect_runtime_availability(&gpus);
+        let detection_warnings: Vec<String> = gpu_result.warning.into_iter().collect();
+        let hw = Self {
+            cpu,
+            gpus,
+            memory,
+            platform,
+            availability,
+            detection_warnings,
+        };
+        log::info!(
+            "硬件检测完成: CPU={}, {} GPU(s), {} MB RAM",
+            hw.cpu.name,
+            hw.gpus.len(),
+            hw.memory.total
+        );
+        hw
     }
 }
 

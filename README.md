@@ -1,187 +1,122 @@
-# ⚡ Velox Engine Picker
+# Velox Engine Picker
 
-> **方案 B — 项目名称：Velox-Engine-Picker**
->
-> 仓库：[github.com/VeloxLLM/Velox-Engine-Picker](https://github.com/VeloxLLM/Velox-Engine-Picker)
+Velox Engine Picker 是一个 Tauri + React + Rust 桌面工具，用于检测本机硬件、平台和常见推理运行时，并分别给出：
 
----
+- **当前可运行首选**：已经检测到所需驱动或运行时的方案。
+- **理论最佳方案**：硬件兼容，但可能仍需安装运行时的方案。
 
-## 项目简介
+项目不会下载、安装或执行第三方运行时，也不会上传硬件信息。
 
-### 🇨🇳 中文
-**Velox Engine Picker** — 一键检测本机 CPU / iGPU / dGPU 硬件配置，智能为你的 LLM 模型推荐最佳推理引擎（OpenVINO · CUDA · TensorRT · ROCm · llama.cpp）。基于 Tauri + React + Rust 打造的跨平台桌面工具。
+## 平台分层
 
-### 🇺🇸 English
-**Velox Engine Picker** — A cross-platform desktop tool built with Tauri + React + Rust that detects your local CPU, iGPU, and discrete GPU configurations with one click, and intelligently recommends the optimal LLM inference engine (OpenVINO, CUDA, TensorRT, ROCm, llama.cpp, and more) for your hardware.
+| Feature | 平台 | 发布状态 |
+| --- | --- | --- |
+| `v1`（默认） | Windows x64 | 稳定首发目标 |
+| `v2` | Windows、macOS x64/ARM64 | 实验性 |
+| `v3` | Windows、macOS、Linux，含 ARM | 实验性 |
 
-### 🌐 中英双语
-**Velox Engine Picker** — 一键检测本机 CPU / 核显 / 独显硬件配置，智能为你的 LLM 模型推荐最佳推理引擎（OpenVINO · CUDA · TensorRT · ROCm · llama.cpp）。  
-A cross-platform desktop utility built with Tauri + React + Rust that detects CPU/iGPU/dGPU specs in one click and recommends the best LLM inference backend for your machine.
+非法平台/feature 组合会在编译期失败。v2/v3 在原生 CI runner 做编译和单元测试，但在完成对应真实硬件验收前不声明稳定支持。
 
----
+## 已实现
 
-## ✨ 特性
+### 硬件与平台检测
 
-- 🔍 **一键硬件检测**：CPU 型号 / 核心数 / 频率 / 架构、内存使用率进度条、GPU/iGPU 列表（厂商 / 类型 / 后端 / 显存估算）
-- 🎯 **智能引擎推荐**：
-  - NVIDIA dGPU（显存充足）→ TensorRT
-  - NVIDIA dGPU（显存较小）→ CUDA + llama.cpp
-  - AMD dGPU → ROCm / DirectML
-  - Intel GPU（iGPU / Arc）→ OpenVINO GPU
-  - Apple Silicon → llama.cpp + Metal
-  - ARM CPU（v3）→ llama.cpp (ARM64 + NEON)
-  - 兜底 → CPU (OpenVINO / llama.cpp)
-- 📋 **版本分层**：通过 Cargo features 提供 v1 / v2 / v3 三个递进版本（见下表）
-- 💡 **模型大小建议**：根据显存/内存自动给出可运行的模型规模
+- Windows 通过 DXGI 枚举适配器，过滤软件、远程、虚拟和间接显示适配器，并读取真实专用显存。
+- 界面分别列出 dGPU 与 iGPU；未发现 iGPU 时会明确提示，而不是静默省略。
+- 无法取得显存时显示“未知”，不会根据显卡名称猜容量或套用低显存结论。
+- 显示 CPU 物理核心、逻辑处理器、架构和 SSE4.2/AVX/AVX2/AVX-512/FMA/NEON 等指令集。
+- GPU 未发现返回正常 CPU-only 结果；GPU 探测失败返回结构化错误，前端允许重试。
+- 检测在后台线程执行，不阻塞 UI 主线程。
 
----
+### 运行时可用性
 
-## 🗂️ 版本分层（v1 / v2 / v3）
+每个后端使用四级状态：
 
-使用 **Cargo features** 实现递进式包含（v3 ⊇ v2 ⊇ v1），通过 `cargo build --features <version>` 或 `cargo run --features <version>` 选择版本：
+| 状态 | 含义 |
+| --- | --- |
+| `Ready` | 硬件和所需驱动/运行时均检测到 |
+| `CompatibleMissingRuntime` | 硬件兼容，但软件尚未检测到 |
+| `Unsupported` | 当前平台或硬件不支持 |
+| `Unknown` | 检测失败，不能武断推荐 |
 
-| 版本 | Feature | 目标平台 | 图形后端 | 额外能力 |
-|------|---------|---------|----------|---------|
-| **v1** (默认) | `v1` | 🪟 **Windows 专用** | Dx12 / Dx11 / Vulkan | DirectML 优先推荐，过滤 Metal |
-| **v2** | `v2` | 🪟 Windows + 🍎 **macOS** (AMD64) | 上述 + **Metal** | Apple Silicon Metal 推荐分支；macOS UI 适配 |
-| **v3** | `v3` | 上述 + ⚛️ **全架构** (AArch64 / ARM64 / ARM32) | PRIMARY（全后端） | **ARM 架构感知**：NEON 优化提示、Snapdragon X / 树莓派 / Apple Silicon 自动识别 |
+Windows v1 探测 OpenVINO、NVIDIA 驱动/CUDA、TensorRT、DirectML/D3D12、ROCm/HIP、llama.cpp 和 ONNX Runtime 的保守本地信号。检测到文件或命令只代表“具备运行条件信号”，不等价于所有模型均已验证。
 
-> 💡 v3 是"完整版"，v2 在 v1 上加 macOS，v1 专注最广泛的 Windows 用户。
+运行时信号仍用于生成“当前可运行首选”，但界面不再展示冗长的逐项运行时列表。
 
----
+### 在线模型推荐
 
-## 🚀 快速开始
+- 左侧“在线模型”独立页面实时读取 Ollama Library 与 LM Studio Model Catalog 官方目录，不扫描本机模型文件。
+- 从在线目录识别模型族和参数规格，按常见 Q4 量化体积、独显显存和系统内存筛选本机可能运行的规格。
+- 可按 Ollama / LM Studio 来源和模型名称筛选；单个来源读取失败时保留另一来源结果并明确提示。
+- 估算不代表推理速度、最大上下文或模型一定兼容；硬件信息只在本机参与计算，不会随目录请求上传。
 
-### 前置要求
-- **Node.js**：Node.js 18+（推荐 20+）
-- **Rust toolchain**：Rust 1.75+（通过 [`rustup`](https://rustup.rs/) 安装）
-- **Windows**：需安装最新的显卡驱动（Vulkan 1.2+ / DirectX 12）
-- **macOS**（v2/v3）：Xcode Command Line Tools
-- **Linux ARM**（v3）：`libxcb` / `libxkbcommon` / Vulkan driver
+### 平台感知推荐
 
-### 启动开发模式
+- Windows AMD 不会仅凭厂商首推 ROCm；DirectML 是默认理论方案，ROCm 只有检测到有效环境时才进入可运行候选。
+- DirectML 不会出现在非 Windows 平台。
+- NVIDIA 未知显存不会被当作低显存。
+- Intel 核显、NVIDIA 已知/未知显存、AMD Windows、CPU-only、运行时缺失、探测失败和 v1/v2/v3 规则均由固定夹具或原生 CI 覆盖。
 
-```bash
-# 安装前端依赖
-npm install
+## 界面状态
 
-# 启动 Tauri 开发服务器（自动启动 Vite HMR + Rust 后端）
-npm run tauri dev
+界面覆盖首次加载、检测失败、重新检测、无 GPU、未检测到 iGPU、未知显存、当前无可运行首选、在线模型估算以及理论方案展示；支持键盘操作、窄窗口布局和高对比度状态标签。
+
+Shell 插件和无用权限已移除，应用采用最小 capability 与 CSP；当前版本不需要打开外部链接。
+
+## 开发与验证
+
+固定环境：Node.js 20 LTS、Rust stable `1.97.1`。Windows 原生构建需要 Visual Studio C++ Build Tools。
+
+```powershell
+npm ci
+npm test
+npm run build
+
+cargo fmt --manifest-path src-tauri\Cargo.toml -- --check
+cargo clippy --locked --manifest-path src-tauri\Cargo.toml `
+  --no-default-features --features v1 --all-targets -- -D warnings
+cargo test --locked --manifest-path src-tauri\Cargo.toml `
+  --no-default-features --features v1
+
+npm run tauri build -- --features v1
 ```
 
-### 构建 Release 版
+实验版检查：
 
-```bash
-npm run tauri build
+```powershell
+cargo test --locked --manifest-path src-tauri\Cargo.toml --no-default-features --features v2
+cargo test --locked --manifest-path src-tauri\Cargo.toml --no-default-features --features v3
 ```
 
-### 按版本手动构建
+`package-lock.json` 和 `src-tauri/Cargo.lock` 均已提交。CI 将 Windows v1 前端、Rust 测试和 Tauri 构建作为门禁；macOS v2 与 Linux v3 使用对应原生 runner 做实验性检查。
 
-```bash
-# Win-only (v1)
-cargo build --release --features v1
+## 发布
 
-# Win + macOS (v2)
-cargo build --release --features v2
+Tauri 配置显式启用 Windows MSI/NSIS，Windows MSVC 构建采用静态 CRT。推送 `v*` 标签会构建两种安装包、生成 `SHA256SUMS.txt`，并创建 unsigned prerelease。发布前仍需人工覆盖：
 
-# Full (v3，包含 ARM 感知)
-cargo build --release --features v3
+1. Intel 核显机器。
+2. NVIDIA 独显机器。
+3. AMD 机器；无法取得时必须标注“未实机验证”。
+4. 干净 Windows x64 环境的安装、启动、重新检测和卸载。
 
-# ARM64 用户可附加原生 CPU 优化（可选，可获得 ~15% CPU 推理加速）
-RUSTFLAGS="-C target-cpu=native" cargo build --release --features v3
-```
+没有代码签名证书时不得把 unsigned prerelease 描述为正式签名稳定版。
 
-### 交叉编译（常用 target）
+### 2026-08-01 本机验证记录
 
-需要先 `rustup target add <target>`：
+- 前端组件/Hook 测试与生产构建通过；生产依赖 `npm audit --omit=dev` 为 0 个已知漏洞。
+- Windows v1、v2、v3 固定夹具测试和 v1 严格 Clippy 通过。
+- Windows v1 静态 CRT Release 构建通过；PE 依赖检查不包含 `VCRUNTIME` 或 `MSVCP` DLL。
+- WiX MSI 与 NSIS setup 均已实际生成并计算 SHA-256。
 
-```bash
-# macOS (Apple Silicon)
-cargo build --release --features v3 --target aarch64-apple-darwin
+上述记录不能替代 Intel/NVIDIA/AMD 三类真实机器和干净 Windows 安装/卸载验收，因此当前标签发布仍保持 unsigned prerelease。
 
-# macOS (Intel)
-cargo build --release --features v2 --target x86_64-apple-darwin
+## 已知限制与路线图
 
-# Linux ARM64 (树莓派5 / ARM服务器)
-cargo build --release --features v3 --target aarch64-unknown-linux-gnu
+- v2/v3 仍为实验性。
+- 当前不运行自动性能基准，避免把一次短测当作通用引擎排名。
+- 内存建议仍是保守区间；后续将允许输入模型规模、量化格式和上下文长度。
+- 后续计划导出 Markdown/JSON 硬件报告，并增加官方运行时安装链接；首版不会自动安装第三方组件。
 
-# Windows ARM64 (Surface / Snapdragon X Elite)
-cargo build --release --features v3 --target aarch64-pc-windows-msvc
-```
+## License
 
----
-
-## 🧱 项目结构
-
-```
-Velox-Engine-Picker/
-├── package.json                  # 前端依赖
-├── index.html                    # HTML 入口
-├── vite.config.ts                # Vite 配置
-├── tsconfig.json
-├── tsconfig.node.json
-├── .gitignore
-├── README.md                     ← 本文件
-├── public/                       # 静态资源
-│   └── vite.svg                  # Favicon
-├── src/                          # React 前端
-│   ├── main.tsx                  # React 入口
-│   ├── App.tsx                   # 主组件（标签页切换）
-│   ├── App.css                   # 样式
-│   ├── types.ts                  # TypeScript 类型定义
-│   ├── vite-env.d.ts
-│   └── components/
-│       ├── HardwarePanel.tsx     # 硬件信息展示
-│       └── RecommendationPanel.tsx  # 引擎推荐展示
-└── src-tauri/                    # Tauri Rust 后端
-    ├── Cargo.toml                # features: v1 / v2 / v3
-    ├── tauri.conf.json           # Tauri 配置
-    ├── build.rs
-    ├── capabilities/
-    │   └── default.json
-    └── src/
-        ├── main.rs               # 入口
-        ├── lib.rs                # 注册 Tauri 命令
-        ├── commands.rs           # IPC 命令
-        ├── hardware/             # 硬件检测
-        │   ├── mod.rs
-        │   ├── cpu.rs
-        │   ├── memory.rs
-        │   └── gpu.rs
-        └── engine/               # 推荐算法
-            ├── mod.rs
-            ├── types.rs
-            └── recommender.rs
-```
-
----
-
-## 🧪 引擎推荐决策表（内置逻辑）
-
-| 硬件场景 | 首推方案 | 备选方案 |
-|---------|---------|---------|
-| NVIDIA dGPU 显存 ≥ 4GB | **TensorRT** | CUDA (llama.cpp) · DirectML |
-| NVIDIA dGPU 显存 < 4GB | **CUDA (llama.cpp)** | TensorRT · DirectML |
-| AMD dGPU | **ROCm** | DirectML · Vulkan (llama.cpp) |
-| Intel iGPU / Arc | **OpenVINO GPU** | DirectML · OpenVINO CPU |
-| Apple Silicon (v2+) | **llama.cpp + Metal** | ONNX Runtime CPU |
-| ARM CPU 无 GPU (v3) | **llama.cpp (ARM64 + NEON)** | OpenVINO CPU |
-| 纯 CPU x86_64 | **OpenVINO CPU** | llama.cpp CPU |
-
----
-
-## 📝 开发计划
-
-- [x] v1：Windows 专用版本（Tauri + React + Rust 架构）
-- [x] v2：加入 macOS + Metal 支持
-- [x] v3：加入 ARM 架构感知
-- [ ] 更准确的 VRAM 检测（DXGI / NVML / IOKit 平台原生 API）
-- [ ] CPU 指令集检测（AVX2 / AVX-512 / NEON / AMX）
-- [ ] 导出推荐报告（Markdown / JSON）
-- [ ] 提供预编译 GitHub Actions CI 发布包
-
----
-
-## 📄 License
-
-MIT OR Apache-2.0 © Velox
+[MIT](LICENSE)

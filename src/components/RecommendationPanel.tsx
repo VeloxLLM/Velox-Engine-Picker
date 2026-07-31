@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useMemo, useState } from "react";
 import type {
   HardwareInfo,
   EngineRecommendation,
@@ -39,13 +39,21 @@ const BACKEND_CATEGORIES: Record<BackendType, string> = {
   Vulkan: "GPU (通用)",
 };
 
-export default function RecommendationPanel({ hw, rec }: Props) {
+// ── 模块级样式常量 ──
+const HEADING_STYLE = { fontSize: 20, marginBottom: 4 } as const;
+const SUBTITLE_STYLE = { color: "#888", fontSize: 12, marginBottom: 16 } as const;
+const FLEX_GAP8_MB10_STYLE = { display: "flex", gap: 8, marginBottom: 10 } as const;
+const REASON_ITEM_STYLE = { display: "flex", gap: 8, marginBottom: 4, fontSize: 13 } as const;
+const REASON_DOT_STYLE = { color: "#10b981" } as const;
+const MUTED_STYLE = { color: "#888" } as const;
+type CheatRow = [InferenceEngine, BackendType, string, boolean];
+
+function RecommendationPanelInner({ hw, rec }: Props) {
   const [cheatOpen, setCheatOpen] = useState(false);
 
-  const primaryColor = BACKEND_COLORS[rec.primary.backend];
+  const primaryColor = useMemo(() => BACKEND_COLORS[rec.primary.backend], [rec.primary.backend]);
 
-  // 速查表数据
-  const cheatData: [InferenceEngine, BackendType, string, boolean][] = [
+  const cheatData: CheatRow[] = useMemo(() => [
     ["OpenVino", "Cpu", "Intel/AMD CPU 通用，适合纯 CPU 服务器", true],
     ["OpenVino", "OpenVinoGpu", "Intel iGPU / Arc 独显，官方优化", hw.gpus.some(g => g.vendor === "Intel")],
     ["LlamaCpp", "Cpu", "本地轻量推理首选，支持 GGUF 量化", true],
@@ -53,19 +61,29 @@ export default function RecommendationPanel({ hw, rec }: Props) {
     ["TensorRT", "TensorRT", "NVIDIA 最高性能，INT8/FP8 量化强", hw.gpus.some(g => g.vendor === "Nvidia" && g.gpu_type === "Discrete")],
     ["ROCm", "Rocm", "AMD dGPU / APU，Linux 生态优先", hw.gpus.some(g => g.vendor === "Amd" && g.gpu_type === "Discrete")],
     ["DirectML", "DirectML", "Windows 通用，兼容 Intel/AMD/NVIDIA", true],
-  ];
+  ], [hw.gpus]);
 
   return (
     <div>
-      <h2 style={{ fontSize: 20, marginBottom: 4 }}>推荐推理引擎</h2>
-      <p style={{ color: "#888", fontSize: 12, marginBottom: 16 }}>
-        基于本机硬件自动匹配
-      </p>
+      <h2 style={HEADING_STYLE}>推荐推理引擎</h2>
+      <p style={SUBTITLE_STYLE}>基于本机硬件自动匹配</p>
+
+      {rec.ready_primary ? (
+        <div className="ready-banner">
+          <strong>当前可运行首选</strong>
+          <span>{ENGINE_NAMES[rec.ready_primary.engine]} · {BACKEND_NAMES[rec.ready_primary.backend]}</span>
+        </div>
+      ) : (
+        <div className="warning-banner">
+          <strong>未检测到可直接运行的推理环境</strong>
+          <span>下面展示的是硬件兼容性建议，请先安装对应运行时。</span>
+        </div>
+      )}
 
       {/* Primary Card */}
       <div className="primary-card" style={{ borderColor: primaryColor }}>
         <div className="primary-badge" style={{ color: primaryColor }}>
-          ⭐ 首推方案 (Recommended)
+          理论最佳方案（硬件兼容性）
         </div>
         <div className="primary-row">
           <span className="primary-engine">
@@ -76,7 +94,7 @@ export default function RecommendationPanel({ hw, rec }: Props) {
             {BACKEND_NAMES[rec.primary.backend]}
           </span>
         </div>
-        <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+        <div style={FLEX_GAP8_MB10_STYLE}>
           <span className="chip">厂商：{ENGINE_VENDORS[rec.primary.engine]}</span>
           <span className="chip">
             后端类型：{BACKEND_CATEGORIES[rec.primary.backend]}
@@ -93,16 +111,8 @@ export default function RecommendationPanel({ hw, rec }: Props) {
           <div className="card-title">推荐理由</div>
           <ul style={{ listStyle: "none", padding: 0 }}>
             {rec.reasons.map((r, i) => (
-              <li
-                key={i}
-                style={{
-                  display: "flex",
-                  gap: 8,
-                  marginBottom: 4,
-                  fontSize: 13,
-                }}
-              >
-                <span style={{ color: "#10b981" }}>•</span>
+              <li key={i} style={REASON_ITEM_STYLE}>
+                <span style={REASON_DOT_STYLE}>•</span>
                 <span>{r}</span>
               </li>
             ))}
@@ -110,14 +120,21 @@ export default function RecommendationPanel({ hw, rec }: Props) {
         </div>
       )}
 
+      {rec.warnings.length > 0 && (
+        <div className="warning-banner warning-list" role="status">
+          <strong>检测提示</strong>
+          {rec.warnings.map((warning) => <span key={warning}>{warning}</span>)}
+        </div>
+      )}
+
       {/* Alternatives */}
       <div className="card">
         <div className="card-title">备选方案（按优先级降序）</div>
         {rec.alternatives.length === 0 ? (
-          <span style={{ color: "#888" }}>（无）</span>
+          <span style={MUTED_STYLE}>（无）</span>
         ) : (
           <div className="table-grid">
-            <div className="table-row header">
+            <div className="table-row cheat-table-row header">
               <span>#</span>
               <span>引擎</span>
               <span>后端</span>
@@ -126,11 +143,11 @@ export default function RecommendationPanel({ hw, rec }: Props) {
             {rec.alternatives.map((a, i) => {
               const color = BACKEND_COLORS[a.backend];
               return (
-                <div className="table-row striped" key={i}>
+                <div className="table-row cheat-table-row striped" key={i}>
                   <span style={{ color, fontWeight: 600 }}>{i + 1}</span>
                   <span style={{ fontWeight: 600 }}>{ENGINE_NAMES[a.engine]}</span>
                   <span style={{ color }}>{BACKEND_NAMES[a.backend]}</span>
-                  <span style={{ color: "#888" }}>{ENGINE_VENDORS[a.engine]}</span>
+                  <span style={MUTED_STYLE}>{ENGINE_VENDORS[a.engine]}</span>
                 </div>
               );
             })}
@@ -166,7 +183,7 @@ export default function RecommendationPanel({ hw, rec }: Props) {
               <div className="table-row striped" key={i}>
                 <span style={{ fontWeight: 600 }}>{ENGINE_NAMES[eng]}</span>
                 <span style={{ color }}>{BACKEND_NAMES[backend]}</span>
-                <span style={{ color: "#888" }}>{scene}</span>
+                <span style={MUTED_STYLE}>{scene}</span>
                 <span style={{ color: ok ? "#10b981" : "#666" }}>
                   {ok ? "是" : "否"}
                 </span>
@@ -178,3 +195,8 @@ export default function RecommendationPanel({ hw, rec }: Props) {
     </div>
   );
 }
+
+const RecommendationPanel = memo(RecommendationPanelInner);
+RecommendationPanel.displayName = "RecommendationPanel";
+
+export default RecommendationPanel;
