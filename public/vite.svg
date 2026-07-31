@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="64" y2="64">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#8b5cf6"/>
+    </linearGradient>
+    <linearGradient id="bolt" x1="20" y1="8" x2="44" y2="56">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#c4b5fd"/>
+    </linearGradient>
+  </defs>
+  <!-- 圆角六边形背景 -->
+  <path d="M32 4L52 14.5V35.5L32 60L12 35.5V14.5L32 4Z" fill="url(#bg)"/>
+  <!-- 闪电图标 -->
+  <path d="M36 12L22 34H30L28 52L44 28H36L38 12Z" fill="url(#bolt)"/>
+</svg>

@@ -224,3 +224,175 @@ fn build_memory_tip(hw: &HardwareInfo) -> Option<String> {
         Some(tips.join("；"))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::engine::types::{BackendType, InferenceEngine};
+    use crate::hardware::{CpuArch, CpuBrand, CpuInfo, GpuBackend, GpuInfo, GpuType, GpuVendor, HardwareInfo, MemoryInfo};
+
+    fn make_x86_cpu() -> CpuInfo {
+        CpuInfo {
+            name: "Intel Core i7-13700K".into(),
+            vendor: "GenuineIntel".into(),
+            core_count: 16,
+            frequency: 3400,
+            brand: CpuBrand::Intel,
+            arch: CpuArch::X86_64,
+        }
+    }
+
+    fn make_hw(cpu: CpuInfo, gpus: Vec<GpuInfo>, total_mb: u64) -> HardwareInfo {
+        HardwareInfo {
+            cpu,
+            memory: MemoryInfo {
+                total: total_mb,
+                available: total_mb / 2,
+            },
+            gpus,
+        }
+    }
+
+    /// 1. NVIDIA dGPU 显存充足（≥4GB）→ 首推引擎应为 TensorRT
+    #[test]
+    fn test_nvidia_vram_sufficient_recommends_tensorrt() {
+        let hw = make_hw(
+            make_x86_cpu(),
+            vec![GpuInfo {
+                name: "NVIDIA GeForce RTX 4060".into(),
+                vendor: GpuVendor::Nvidia,
+                gpu_type: GpuType::Discrete,
+                vram: Some(6 * 1024),
+                backend: GpuBackend::Vulkan,
+                device_id: (0x10DE, 0),
+            }],
+            16 * 1024,
+        );
+        let rec = super::recommend(&hw);
+        assert_eq!(rec.primary.engine, InferenceEngine::TensorRT);
+        assert_eq!(rec.primary.backend, BackendType::TensorRT);
+    }
+
+    /// 2. NVIDIA dGPU 显存不足（<4GB）→ 首推引擎应为 LlamaCpp，后端为 Cuda
+    #[test]
+    fn test_nvidia_vram_insufficient_recommends_llamacpp_cuda() {
+        let hw = make_hw(
+            make_x86_cpu(),
+            vec![GpuInfo {
+                name: "NVIDIA GeForce GT 1030".into(),
+                vendor: GpuVendor::Nvidia,
+                gpu_type: GpuType::Discrete,
+                vram: Some(2 * 1024),
+                backend: GpuBackend::Vulkan,
+                device_id: (0x10DE, 0),
+            }],
+            16 * 1024,
+        );
+        let rec = super::recommend(&hw);
+        assert_eq!(rec.primary.engine, InferenceEngine::LlamaCpp);
+        assert_eq!(rec.primary.backend, BackendType::Cuda);
+    }
+
+    /// 3. Intel iGPU → 首推引擎应为 OpenVino，后端为 OpenVinoGpu
+    #[test]
+    fn test_intel_igpu_recommends_openvino_gpu() {
+        let hw = make_hw(
+            make_x86_cpu(),
+            vec![GpuInfo {
+                name: "Intel UHD Graphics 770".into(),
+                vendor: GpuVendor::Intel,
+                gpu_type: GpuType::Integrated,
+                vram: None,
+                backend: GpuBackend::Vulkan,
+                device_id: (0x8086, 0),
+            }],
+            16 * 1024,
+        );
+        let rec = super::recommend(&hw);
+        assert_eq!(rec.primary.engine, InferenceEngine::OpenVino);
+        assert_eq!(rec.primary.backend, BackendType::OpenVinoGpu);
+    }
+
+    /// 4. AMD dGPU → 首推引擎应为 ROCm
+    #[test]
+    fn test_amd_dgpu_recommends_rocm() {
+        let hw = make_hw(
+            make_x86_cpu(),
+            vec![GpuInfo {
+                name: "AMD Radeon RX 7900 XTX".into(),
+                vendor: GpuVendor::Amd,
+                gpu_type: GpuType::Discrete,
+                vram: Some(24 * 1024),
+                backend: GpuBackend::Vulkan,
+                device_id: (0x1002, 0),
+            }],
+            32 * 1024,
+        );
+        let rec = super::recommend(&hw);
+        assert_eq!(rec.primary.engine, InferenceEngine::ROCm);
+        assert_eq!(rec.primary.backend, BackendType::Rocm);
+    }
+
+    /// 5. Apple Silicon（需要 feature v2 或 v3）→ 首推引擎应为 LlamaCpp，后端为 Metal
+    #[cfg(any(feature = "v2", feature = "v3"))]
+    #[test]
+    fn test_apple_silicon_recommends_llamacpp_metal() {
+        let hw = HardwareInfo {
+            cpu: CpuInfo {
+                name: "Apple M3 Pro".into(),
+                vendor: "Apple".into(),
+                core_count: 12,
+                frequency: 0,
+                brand: CpuBrand::Apple,
+                arch: CpuArch::Aarch64,
+            },
+            memory: MemoryInfo {
+                total: 18 * 1024,
+                available: 12 * 1024,
+            },
+            gpus: vec![GpuInfo {
+                name: "Apple M3 Pro".into(),
+                vendor: GpuVendor::Apple,
+                gpu_type: GpuType::Integrated,
+                vram: None,
+                backend: GpuBackend::Metal,
+                device_id: (0x106B, 0),
+            }],
+        };
+        let rec = super::recommend(&hw);
+        assert_eq!(rec.primary.engine, InferenceEngine::LlamaCpp);
+        assert_eq!(rec.primary.backend, BackendType::Metal);
+    }
+
+    /// 6. 纯 CPU x86_64（无 GPU）→ 首推引擎应为 OpenVino，后端为 Cpu
+    #[test]
+    fn test_cpu_only_x86_64_recommends_openvino_cpu() {
+        let hw = make_hw(make_x86_cpu(), vec![], 16 * 1024);
+        let rec = super::recommend(&hw);
+        assert_eq!(rec.primary.engine, InferenceEngine::OpenVino);
+        assert_eq!(rec.primary.backend, BackendType::Cpu);
+    }
+
+    /// 7. ARM CPU 无 GPU（需要 feature v3）→ 首推引擎应为 LlamaCpp，后端为 Cpu
+    #[cfg(feature = "v3")]
+    #[test]
+    fn test_arm_cpu_no_gpu_recommends_llamacpp_cpu() {
+        let hw = HardwareInfo {
+            cpu: CpuInfo {
+                name: "Qualcomm Snapdragon X Elite".into(),
+                vendor: "Qualcomm".into(),
+                core_count: 12,
+                frequency: 0,
+                brand: CpuBrand::Qualcomm,
+                arch: CpuArch::Aarch64,
+            },
+            memory: MemoryInfo {
+                total: 16 * 1024,
+                available: 8 * 1024,
+            },
+            gpus: vec![],
+        };
+        let rec = super::recommend(&hw);
+        assert_eq!(rec.primary.engine, InferenceEngine::LlamaCpp);
+        assert_eq!(rec.primary.backend, BackendType::Cpu);
+    }
+}
