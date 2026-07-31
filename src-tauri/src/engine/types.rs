@@ -164,11 +164,33 @@ impl fmt::Display for EngineBackendPair {
     }
 }
 
+/// 当前机器上某个引擎/后端组合的实际可用状态。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AvailabilityStatus {
+    Ready,
+    CompatibleMissingRuntime,
+    Unsupported,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EngineAvailability {
+    pub target: EngineBackendPair,
+    pub status: AvailabilityStatus,
+    pub version: Option<String>,
+    pub evidence: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EngineRecommendation {
+    /// 理论上最适合当前硬件的方案。`primary` 暂时保留给早期调用方。
     pub primary: EngineBackendPair,
+    pub theoretical_primary: EngineBackendPair,
+    /// 已检测到所需驱动/运行时、当前可以直接使用的首选方案。
+    pub ready_primary: Option<EngineBackendPair>,
     pub alternatives: Vec<EngineBackendPair>,
     pub reasons: Vec<String>,
+    pub warnings: Vec<String>,
     pub memory_tip: Option<String>,
     pub session_id: String,
     pub session_ts: u64,

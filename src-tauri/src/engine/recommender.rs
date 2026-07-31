@@ -5,8 +5,10 @@
 //! - v2          ：+ macOS，推荐 Metal（Apple Silicon）/ AMD64 macOS
 //! - v3          ：+ ARM，感知 AArch64 架构（Snapdragon X / 树莓派 / Apple Silicon）
 
+use crate::engine::types::{
+    AvailabilityStatus, BackendType, EngineBackendPair, EngineRecommendation, InferenceEngine,
+};
 use crate::hardware::{CpuArch, GpuType, GpuVendor, HardwareInfo};
-use crate::engine::types::{BackendType, EngineBackendPair, EngineRecommendation, InferenceEngine};
 
 const NVIDIA_MIN_VRAM_MB_FOR_7B: u64 = 4 * 1024;
 const SYSTEM_MIN_RAM_MB_FOR_7B_CPU: u64 = 8 * 1024;
@@ -33,14 +35,7 @@ fn backend_allowed(b: BackendType) -> bool {
 }
 
 fn directml_allowed() -> bool {
-    #[cfg(target_os = "windows")]
-    {
-        true
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        cfg!(any(feature = "v2", feature = "v3"))
-    }
+    cfg!(target_os = "windows")
 }
 
 fn metal_allowed() -> bool {
@@ -64,12 +59,14 @@ pub fn recommend(hw: &HardwareInfo) -> EngineRecommendation {
         ));
     }
 
-    let nvidia_discrete = hw.gpus.iter().find(|g| {
-        g.vendor == GpuVendor::Nvidia && g.gpu_type == GpuType::Discrete
-    });
-    let amd_discrete = hw.gpus.iter().find(|g| {
-        g.vendor == GpuVendor::Amd && g.gpu_type == GpuType::Discrete
-    });
+    let nvidia_discrete = hw
+        .gpus
+        .iter()
+        .find(|g| g.vendor == GpuVendor::Nvidia && g.gpu_type == GpuType::Discrete);
+    let amd_discrete = hw
+        .gpus
+        .iter()
+        .find(|g| g.vendor == GpuVendor::Amd && g.gpu_type == GpuType::Discrete);
     let intel_gpu = hw.gpus.iter().find(|g| g.vendor == GpuVendor::Intel);
     let apple_gpu = if metal_allowed() {
         hw.gpus.iter().find(|g| g.vendor == GpuVendor::Apple)
@@ -80,36 +77,68 @@ pub fn recommend(hw: &HardwareInfo) -> EngineRecommendation {
     let primary: EngineBackendPair;
 
     if let Some(g) = nvidia_discrete {
-        let enough_vram = g.vram.unwrap_or(0) >= NVIDIA_MIN_VRAM_MB_FOR_7B;
-        primary = if enough_vram {
-            reasons.push(format!(
-                "检测到 NVIDIA 独立显卡「{}」，显存 {} MB，推荐 TensorRT 以获得最佳推理性能",
-                g.name,
-                g.vram.map(|v| v.to_string()).unwrap_or_else(|| "充足".to_string())
-            ));
-            EngineBackendPair::new(InferenceEngine::TensorRT, BackendType::TensorRT)
-        } else {
-            reasons.push(format!(
-                "检测到 NVIDIA 独立显卡「{}」，显存较小或未知，推荐 CUDA 后端（兼容性更广泛）",
-                g.name
-            ));
-            EngineBackendPair::new(InferenceEngine::LlamaCpp, BackendType::Cuda)
+        primary = match g.vram {
+            Some(vram) if vram >= NVIDIA_MIN_VRAM_MB_FOR_7B => {
+                reasons.push(format!(
+                    "检测到 NVIDIA 独立显卡「{}」，专用显存 {} MB；理论上优先 TensorRT",
+                    g.name, vram
+                ));
+                EngineBackendPair::new(InferenceEngine::TensorRT, BackendType::TensorRT)
+            }
+            Some(vram) => {
+                reasons.push(format!(
+                    "检测到 NVIDIA 独立显卡「{}」，专用显存 {} MB；优先选择开销较低的 llama.cpp CUDA",
+                    g.name, vram
+                ));
+                EngineBackendPair::new(InferenceEngine::LlamaCpp, BackendType::Cuda)
+            }
+            None => {
+                reasons.push(format!(
+                    "检测到 NVIDIA 独立显卡「{}」，但无法读取专用显存；暂以兼容性较广的 llama.cpp CUDA 为保守建议，不推断显存不足",
+                    g.name
+                ));
+                EngineBackendPair::new(InferenceEngine::LlamaCpp, BackendType::Cuda)
+            }
         };
-        alternatives.push(EngineBackendPair::new(InferenceEngine::LlamaCpp, BackendType::Cuda));
-        alternatives.push(EngineBackendPair::new(InferenceEngine::OnnxRuntime, BackendType::Cuda));
+        alternatives.push(EngineBackendPair::new(
+            InferenceEngine::LlamaCpp,
+            BackendType::Cuda,
+        ));
+        alternatives.push(EngineBackendPair::new(
+            InferenceEngine::OnnxRuntime,
+            BackendType::Cuda,
+        ));
         if directml_allowed() {
-            alternatives.push(EngineBackendPair::new(InferenceEngine::DirectML, BackendType::DirectML));
+            alternatives.push(EngineBackendPair::new(
+                InferenceEngine::DirectML,
+                BackendType::DirectML,
+            ));
         }
     } else if let Some(g) = amd_discrete {
-        reasons.push(format!(
-            "检测到 AMD 独立显卡「{}」，推荐使用 ROCm 后端（Linux）或 DirectML（Windows）进行 GPU 加速",
-            g.name
-        ));
-        primary = EngineBackendPair::new(InferenceEngine::ROCm, BackendType::Rocm);
         if directml_allowed() {
-            alternatives.push(EngineBackendPair::new(InferenceEngine::DirectML, BackendType::DirectML));
+            reasons.push(format!(
+                "检测到 AMD 独立显卡「{}」；Windows 首选 DirectML，ROCm 仅在检测到 HIP Runtime 时作为备选",
+                g.name
+            ));
+            primary = EngineBackendPair::new(InferenceEngine::DirectML, BackendType::DirectML);
+            alternatives.push(EngineBackendPair::new(
+                InferenceEngine::ROCm,
+                BackendType::Rocm,
+            ));
+        } else {
+            reasons.push(format!("检测到 AMD 独立显卡「{}」，理论首选 ROCm", g.name));
+            primary = EngineBackendPair::new(InferenceEngine::ROCm, BackendType::Rocm);
         }
-        alternatives.push(EngineBackendPair::new(InferenceEngine::LlamaCpp, BackendType::Vulkan));
+        if directml_allowed() && primary.backend != BackendType::DirectML {
+            alternatives.push(EngineBackendPair::new(
+                InferenceEngine::DirectML,
+                BackendType::DirectML,
+            ));
+        }
+        alternatives.push(EngineBackendPair::new(
+            InferenceEngine::LlamaCpp,
+            BackendType::Vulkan,
+        ));
     } else if let Some(g) = intel_gpu {
         let is_arc = g.name.to_ascii_lowercase().contains("arc") || g.gpu_type == GpuType::Discrete;
         primary = EngineBackendPair::new(InferenceEngine::OpenVino, BackendType::OpenVinoGpu);
@@ -125,21 +154,31 @@ pub fn recommend(hw: &HardwareInfo) -> EngineRecommendation {
             ));
         }
         if directml_allowed() {
-            alternatives.push(EngineBackendPair::new(InferenceEngine::DirectML, BackendType::DirectML));
+            alternatives.push(EngineBackendPair::new(
+                InferenceEngine::DirectML,
+                BackendType::DirectML,
+            ));
         }
-        alternatives.push(EngineBackendPair::new(InferenceEngine::OpenVino, BackendType::Cpu));
+        alternatives.push(EngineBackendPair::new(
+            InferenceEngine::OpenVino,
+            BackendType::Cpu,
+        ));
     } else if let Some(g) = apple_gpu {
         reasons.push(format!(
             "检测到 Apple 芯片 GPU「{}」，推荐 llama.cpp + Metal 后端（苹果生态最成熟方案）",
             g.name
         ));
         primary = EngineBackendPair::new(InferenceEngine::LlamaCpp, BackendType::Metal);
-        alternatives.push(EngineBackendPair::new(InferenceEngine::OnnxRuntime, BackendType::Cpu));
+        alternatives.push(EngineBackendPair::new(
+            InferenceEngine::OnnxRuntime,
+            BackendType::Cpu,
+        ));
     } else {
         if arm_aware() && hw.cpu.arch.is_arm() {
-            reasons.push(format!(
+            reasons.push(
                 "未检测到可用 GPU 加速器，且为 ARM 架构 CPU，优先推荐 llama.cpp (ARM64 + NEON 编译优化)"
-            ));
+                    .to_string(),
+            );
             primary = EngineBackendPair::new(InferenceEngine::LlamaCpp, BackendType::Cpu);
         } else {
             reasons.push(
@@ -150,8 +189,14 @@ pub fn recommend(hw: &HardwareInfo) -> EngineRecommendation {
     }
 
     if !alternatives.iter().any(|a| a.backend == BackendType::Cpu) {
-        alternatives.push(EngineBackendPair::new(InferenceEngine::LlamaCpp, BackendType::Cpu));
-        alternatives.push(EngineBackendPair::new(InferenceEngine::OpenVino, BackendType::Cpu));
+        alternatives.push(EngineBackendPair::new(
+            InferenceEngine::LlamaCpp,
+            BackendType::Cpu,
+        ));
+        alternatives.push(EngineBackendPair::new(
+            InferenceEngine::OpenVino,
+            BackendType::Cpu,
+        ));
     }
 
     let mut alternatives: Vec<EngineBackendPair> = alternatives
@@ -171,11 +216,27 @@ pub fn recommend(hw: &HardwareInfo) -> EngineRecommendation {
     }
 
     let memory_tip = build_memory_tip(hw);
+    let mut ordered_candidates = std::iter::once(primary).chain(dedup_alternatives.iter().copied());
+    let ready_primary = ordered_candidates.find(|candidate| {
+        hw.availability.iter().any(|availability| {
+            availability.target == *candidate && availability.status == AvailabilityStatus::Ready
+        })
+    });
+    let mut warnings = hw.detection_warnings.clone();
+    if ready_primary.is_none() {
+        warnings.push(
+            "未检测到可直接运行的本地推理 Runtime；下方首推是硬件兼容性建议，并非已安装验证"
+                .to_string(),
+        );
+    }
 
     EngineRecommendation {
         primary,
+        theoretical_primary: primary,
+        ready_primary,
         alternatives: dedup_alternatives,
         reasons,
+        warnings,
         memory_tip,
         session_id: uuid::Uuid::new_v4().to_string(),
         session_ts: std::time::SystemTime::now()
@@ -201,7 +262,7 @@ fn build_memory_tip(hw: &HardwareInfo) -> Option<String> {
         ));
     } else {
         tips.push(format!(
-            "系统内存 {} GB，CPU 模式可流畅运行 7B Q4 量化模型，16 GB+ 可尝试 13B",
+            "系统内存 {} GB；实际可用模型规模还取决于量化、上下文长度和运行时开销",
             hw.memory.total / 1024
         ));
     }
@@ -213,13 +274,21 @@ fn build_memory_tip(hw: &HardwareInfo) -> Option<String> {
         if let Some(vram_mb) = g.vram {
             let vram_gb = vram_mb / 1024;
             let note = match vram_gb {
-                0..=3 => format!("「{}」显存较小（{} GB），建议 7B Q4_K_M 或更小模型", g.name, vram_gb),
-                4..=7 => format!("「{}」显存 {} GB，可运行 7B Q4~Q8 / 13B Q4", g.name, vram_gb),
-                8..=15 => format!("「{}」显存 {} GB，可运行 13B / 34B Q4 量化模型", g.name, vram_gb),
-                16..=23 => format!("「{}」显存 {} GB，可流畅运行 34B Q4 或 70B Q3", g.name, vram_gb),
-                _ => format!("「{}」显存 {} GB，可尝试 70B+ 大模型", g.name, vram_gb),
+                0..=3 => format!(
+                    "「{}」显存较小（{} GB），建议 7B Q4_K_M 或更小模型",
+                    g.name, vram_gb
+                ),
+                4..=7 => format!("「{}」显存 {} GB，通常适合较小的量化模型", g.name, vram_gb),
+                8..=15 => format!("「{}」显存 {} GB，可评估中等规模量化模型", g.name, vram_gb),
+                16..=23 => format!("「{}」显存 {} GB，可评估较大规模量化模型", g.name, vram_gb),
+                _ => format!(
+                    "「{}」显存 {} GB；请按模型文件、KV Cache 与后端开销核算",
+                    g.name, vram_gb
+                ),
             };
             tips.push(note);
+        } else {
+            tips.push(format!("无法读取「{}」的专用显存，未估算模型规模", g.name));
         }
     }
 
@@ -268,8 +337,11 @@ pub fn merge_recommendations(recs: &[EngineRecommendation]) -> Option<EngineReco
 
     Some(EngineRecommendation {
         primary: latest.primary,
+        theoretical_primary: latest.theoretical_primary,
+        ready_primary: latest.ready_primary,
         alternatives: seen_pairs,
         reasons: seen_reasons,
+        warnings: latest.warnings.clone(),
         memory_tip: latest.memory_tip.clone(),
         session_id: uuid::Uuid::new_v4().to_string(),
         session_ts: latest.session_ts,
@@ -278,17 +350,24 @@ pub fn merge_recommendations(recs: &[EngineRecommendation]) -> Option<EngineReco
 
 #[cfg(test)]
 mod tests {
-    use crate::engine::types::{BackendType, InferenceEngine};
-    use crate::hardware::{CpuArch, CpuBrand, CpuInfo, GpuBackend, GpuInfo, GpuType, GpuVendor, HardwareInfo, MemoryInfo};
+    use crate::engine::types::{
+        AvailabilityStatus, BackendType, EngineAvailability, EngineBackendPair, InferenceEngine,
+    };
+    use crate::hardware::{
+        CpuArch, CpuBrand, CpuInfo, GpuBackend, GpuInfo, GpuType, GpuVendor, HardwareInfo,
+        MemoryInfo, PlatformInfo,
+    };
 
     fn make_x86_cpu() -> CpuInfo {
         CpuInfo {
             name: "Intel Core i7-13700K".into(),
             vendor: "GenuineIntel".into(),
             core_count: 16,
+            logical_processor_count: 24,
             frequency: 3400,
             brand: CpuBrand::Intel,
             arch: CpuArch::X86_64,
+            instruction_sets: vec!["AVX2".into()],
         }
     }
 
@@ -300,6 +379,14 @@ mod tests {
                 available: total_mb / 2,
             },
             gpus,
+            platform: PlatformInfo {
+                os: std::env::consts::OS.into(),
+                arch: std::env::consts::ARCH.into(),
+                edition: "v1".into(),
+                support_level: "Stable".into(),
+            },
+            availability: vec![],
+            detection_warnings: vec![],
         }
     }
 
@@ -343,6 +430,42 @@ mod tests {
         assert_eq!(rec.primary.backend, BackendType::Cuda);
     }
 
+    #[test]
+    fn test_nvidia_unknown_vram_is_not_reported_as_low_vram() {
+        let hw = make_hw(
+            make_x86_cpu(),
+            vec![GpuInfo {
+                name: "NVIDIA Test Adapter".into(),
+                vendor: GpuVendor::Nvidia,
+                gpu_type: GpuType::Discrete,
+                vram: None,
+                backend: GpuBackend::Dx12,
+                device_id: (0x10DE, 0),
+            }],
+            16 * 1024,
+        );
+        let rec = super::recommend(&hw);
+        assert_eq!(rec.primary.backend, BackendType::Cuda);
+        assert!(rec
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("不推断显存不足")));
+    }
+
+    #[test]
+    fn test_ready_primary_requires_runtime_evidence() {
+        let mut hw = make_hw(make_x86_cpu(), vec![], 16 * 1024);
+        hw.availability.push(EngineAvailability {
+            target: EngineBackendPair::new(InferenceEngine::OpenVino, BackendType::Cpu),
+            status: AvailabilityStatus::Ready,
+            version: None,
+            evidence: "test fixture".into(),
+        });
+        let rec = super::recommend(&hw);
+        assert_eq!(rec.ready_primary, Some(rec.primary));
+        assert!(rec.warnings.is_empty());
+    }
+
     /// 3. Intel iGPU → 首推引擎应为 OpenVino，后端为 OpenVinoGpu
     #[test]
     fn test_intel_igpu_recommends_openvino_gpu() {
@@ -365,7 +488,7 @@ mod tests {
 
     /// 4. AMD dGPU → 首推引擎应为 ROCm
     #[test]
-    fn test_amd_dgpu_recommends_rocm() {
+    fn test_amd_dgpu_recommendation_is_platform_aware() {
         let hw = make_hw(
             make_x86_cpu(),
             vec![GpuInfo {
@@ -379,8 +502,13 @@ mod tests {
             32 * 1024,
         );
         let rec = super::recommend(&hw);
-        assert_eq!(rec.primary.engine, InferenceEngine::ROCm);
-        assert_eq!(rec.primary.backend, BackendType::Rocm);
+        if cfg!(target_os = "windows") {
+            assert_eq!(rec.primary.engine, InferenceEngine::DirectML);
+            assert_eq!(rec.primary.backend, BackendType::DirectML);
+        } else {
+            assert_eq!(rec.primary.engine, InferenceEngine::ROCm);
+            assert_eq!(rec.primary.backend, BackendType::Rocm);
+        }
     }
 
     /// 5. Apple Silicon（需要 feature v2 或 v3）→ 首推引擎应为 LlamaCpp，后端为 Metal
@@ -392,9 +520,11 @@ mod tests {
                 name: "Apple M3 Pro".into(),
                 vendor: "Apple".into(),
                 core_count: 12,
+                logical_processor_count: 12,
                 frequency: 0,
                 brand: CpuBrand::Apple,
                 arch: CpuArch::Aarch64,
+                instruction_sets: vec!["NEON".into()],
             },
             memory: MemoryInfo {
                 total: 18 * 1024,
@@ -408,6 +538,14 @@ mod tests {
                 backend: GpuBackend::Metal,
                 device_id: (0x106B, 0),
             }],
+            platform: PlatformInfo {
+                os: "macos".into(),
+                arch: "aarch64".into(),
+                edition: "v2".into(),
+                support_level: "Experimental".into(),
+            },
+            availability: vec![],
+            detection_warnings: vec![],
         };
         let rec = super::recommend(&hw);
         assert_eq!(rec.primary.engine, InferenceEngine::LlamaCpp);
@@ -432,15 +570,25 @@ mod tests {
                 name: "Qualcomm Snapdragon X Elite".into(),
                 vendor: "Qualcomm".into(),
                 core_count: 12,
+                logical_processor_count: 12,
                 frequency: 0,
                 brand: CpuBrand::Qualcomm,
                 arch: CpuArch::Aarch64,
+                instruction_sets: vec!["NEON".into()],
             },
             memory: MemoryInfo {
                 total: 16 * 1024,
                 available: 8 * 1024,
             },
             gpus: vec![],
+            platform: PlatformInfo {
+                os: "windows".into(),
+                arch: "aarch64".into(),
+                edition: "v3".into(),
+                support_level: "Experimental".into(),
+            },
+            availability: vec![],
+            detection_warnings: vec![],
         };
         let rec = super::recommend(&hw);
         assert_eq!(rec.primary.engine, InferenceEngine::LlamaCpp);

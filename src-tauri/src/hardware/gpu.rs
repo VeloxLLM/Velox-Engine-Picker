@@ -89,7 +89,6 @@ pub enum GpuBackend {
     Vulkan,
     Metal,
     Dx12,
-    Dx11,
     Gl,
     BrowserWebGpu,
     Other,
@@ -107,7 +106,6 @@ impl From<String> for GpuBackend {
             "Vulkan" => Self::Vulkan,
             "Metal" => Self::Metal,
             "Dx12" => Self::Dx12,
-            "Dx11" => Self::Dx11,
             "Gl" => Self::Gl,
             "BrowserWebGpu" => Self::BrowserWebGpu,
             _ => Self::Other,
@@ -121,7 +119,6 @@ impl fmt::Display for GpuBackend {
             Self::Vulkan => f.write_str("Vulkan"),
             Self::Metal => f.write_str("Metal"),
             Self::Dx12 => f.write_str("DirectX 12"),
-            Self::Dx11 => f.write_str("DirectX 11"),
             Self::Gl => f.write_str("OpenGL"),
             Self::BrowserWebGpu => f.write_str("WebGPU"),
             Self::Other => f.write_str("Other"),
@@ -139,15 +136,116 @@ pub struct GpuInfo {
     pub device_id: (u32, u32),
 }
 
+pub struct GpuDetectionResult {
+    pub gpus: Vec<GpuInfo>,
+    pub warning: Option<String>,
+}
+
 #[must_use]
-pub fn collect_gpu_info() -> Vec<GpuInfo> {
-    match pollster::block_on(try_collect_gpu_info()) {
-        Some(gpus) if !gpus.is_empty() => gpus,
-        _ => {
-            log::warn!("GPU 信息检测失败");
-            Vec::new()
+pub fn collect_gpu_info() -> GpuDetectionResult {
+    #[cfg(target_os = "windows")]
+    {
+        match collect_dxgi_gpu_info() {
+            Ok(gpus) if !gpus.is_empty() => GpuDetectionResult {
+                gpus,
+                warning: None,
+            },
+            Ok(_) => GpuDetectionResult {
+                gpus: Vec::new(),
+                warning: None,
+            },
+            Err(error) => GpuDetectionResult {
+                gpus: Vec::new(),
+                warning: Some(format!("DXGI GPU 检测失败: {error}")),
+            },
         }
     }
+    #[cfg(not(target_os = "windows"))]
+    {
+        match pollster::block_on(try_collect_gpu_info()) {
+            Some(gpus) if !gpus.is_empty() => GpuDetectionResult {
+                gpus,
+                warning: None,
+            },
+            Some(_) => GpuDetectionResult {
+                gpus: Vec::new(),
+                warning: None,
+            },
+            None => GpuDetectionResult {
+                gpus: Vec::new(),
+                warning: Some("wgpu GPU 检测失败".to_string()),
+            },
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn collect_dxgi_gpu_info() -> Result<Vec<GpuInfo>, String> {
+    use windows::Win32::Graphics::Dxgi::{
+        CreateDXGIFactory1, IDXGIFactory1, DXGI_ADAPTER_FLAG_SOFTWARE,
+    };
+
+    let wgpu_adapters = pollster::block_on(try_collect_gpu_info()).unwrap_or_default();
+    let factory: IDXGIFactory1 =
+        unsafe { CreateDXGIFactory1() }.map_err(|error| error.to_string())?;
+    let mut results = Vec::new();
+    let mut index = 0;
+
+    loop {
+        let adapter = match unsafe { factory.EnumAdapters1(index) } {
+            Ok(adapter) => adapter,
+            Err(_) => break,
+        };
+        let desc = unsafe { adapter.GetDesc1() }.map_err(|error| error.to_string())?;
+        index += 1;
+
+        if desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32 != 0 {
+            continue;
+        }
+
+        let name = String::from_utf16_lossy(
+            &desc.Description[..desc
+                .Description
+                .iter()
+                .position(|c| *c == 0)
+                .unwrap_or(desc.Description.len())],
+        );
+        let vendor = detect_vendor(desc.VendorId, &name);
+        let matched = wgpu_adapters.iter().find(|gpu| {
+            gpu.vendor == vendor
+                && (gpu.name.eq_ignore_ascii_case(&name)
+                    || gpu
+                        .name
+                        .to_ascii_lowercase()
+                        .contains(&name.to_ascii_lowercase())
+                    || name
+                        .to_ascii_lowercase()
+                        .contains(&gpu.name.to_ascii_lowercase()))
+        });
+        let gpu_type = matched.map_or_else(
+            || {
+                if desc.DedicatedVideoMemory > 512 * 1024 * 1024 {
+                    GpuType::Discrete
+                } else {
+                    GpuType::Integrated
+                }
+            },
+            |gpu| gpu.gpu_type.clone(),
+        );
+        let backend = matched.map_or(GpuBackend::Dx12, |gpu| gpu.backend.clone());
+        let dedicated_mb = desc.DedicatedVideoMemory as u64 / 1024 / 1024;
+
+        results.push(GpuInfo {
+            name,
+            vendor,
+            gpu_type,
+            vram: (dedicated_mb > 0).then_some(dedicated_mb),
+            backend,
+            device_id: (desc.VendorId, desc.DeviceId),
+        });
+    }
+
+    Ok(results)
 }
 
 async fn try_collect_gpu_info() -> Option<Vec<GpuInfo>> {
@@ -155,20 +253,17 @@ async fn try_collect_gpu_info() -> Option<Vec<GpuInfo>> {
     let selected_backends = wgpu::Backends::PRIMARY;
 
     #[cfg(all(feature = "v2", not(feature = "v3")))]
-    let selected_backends = wgpu::Backends::VULKAN
-        | wgpu::Backends::DX12
-        | wgpu::Backends::DX11
-        | wgpu::Backends::METAL;
+    let selected_backends = wgpu::Backends::VULKAN | wgpu::Backends::DX12 | wgpu::Backends::METAL;
 
     #[cfg(all(feature = "v1", not(feature = "v2")))]
-    let selected_backends = wgpu::Backends::VULKAN | wgpu::Backends::DX12 | wgpu::Backends::DX11;
+    let selected_backends = wgpu::Backends::VULKAN | wgpu::Backends::DX12;
 
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: selected_backends,
         ..Default::default()
     });
 
-    let adapters: Vec<_> = instance.enumerate_adapters(selected_backends).collect();
+    let adapters = instance.enumerate_adapters(selected_backends);
 
     if adapters.is_empty() {
         log::warn!("wgpu 未枚举到任何图形适配器");
@@ -186,11 +281,13 @@ async fn try_collect_gpu_info() -> Option<Vec<GpuInfo>> {
             _ => GpuType::Other,
         };
         let backend = map_backend(info.backend);
-        let vram = estimate_vram_from_name(&info.name);
+        // wgpu does not expose physical VRAM. Platform-native collectors fill
+        // this field where possible; never guess capacity from a product name.
+        let vram = None;
 
-        let is_dup = results.iter().any(|e: &GpuInfo| {
-            e.vendor == vendor && e.name == info.name && e.gpu_type == gpu_type
-        });
+        let is_dup = results
+            .iter()
+            .any(|e: &GpuInfo| e.vendor == vendor && e.name == info.name && e.gpu_type == gpu_type);
         if is_dup {
             continue;
         }
@@ -240,37 +337,8 @@ fn map_backend(b: wgpu::Backend) -> GpuBackend {
         wgpu::Backend::Vulkan => GpuBackend::Vulkan,
         wgpu::Backend::Metal => GpuBackend::Metal,
         wgpu::Backend::Dx12 => GpuBackend::Dx12,
-        wgpu::Backend::Dx11 => GpuBackend::Dx11,
         wgpu::Backend::Gl => GpuBackend::Gl,
         wgpu::Backend::BrowserWebGpu => GpuBackend::BrowserWebGpu,
         _ => GpuBackend::Other,
     }
-}
-
-fn estimate_vram_from_name(name: &str) -> Option<u64> {
-    let n = name.to_ascii_lowercase();
-    for marker in ["gb", " gb"] {
-        let mut search_from = 0;
-        while let Some(idx) = n[search_from..].find(marker) {
-            let abs_idx = search_from + idx;
-            let start = if abs_idx >= 6 { abs_idx - 6 } else { 0 };
-            let prefix = &n[start..abs_idx];
-            let digits: String = prefix
-                .chars()
-                .rev()
-                .skip_while(|c| !c.is_ascii_digit())
-                .take_while(|c| c.is_ascii_digit())
-                .collect::<String>()
-                .chars()
-                .rev()
-                .collect();
-            if let Ok(gb) = digits.parse::<u64>() {
-                if gb >= 1 && gb <= 192 {
-                    return Some(gb * 1024);
-                }
-            }
-            search_from = abs_idx + marker.len();
-        }
-    }
-    None
 }

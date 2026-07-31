@@ -46,6 +46,12 @@ const FLEX_GAP8_MB10_STYLE = { display: "flex", gap: 8, marginBottom: 10 } as co
 const REASON_ITEM_STYLE = { display: "flex", gap: 8, marginBottom: 4, fontSize: 13 } as const;
 const REASON_DOT_STYLE = { color: "#10b981" } as const;
 const MUTED_STYLE = { color: "#888" } as const;
+const AVAILABILITY_LABELS = {
+  Ready: "当前可用",
+  CompatibleMissingRuntime: "兼容，缺少运行时",
+  Unsupported: "不支持",
+  Unknown: "未知",
+} as const;
 
 type CheatRow = [InferenceEngine, BackendType, string, boolean];
 
@@ -69,10 +75,22 @@ function RecommendationPanelInner({ hw, rec }: Props) {
       <h2 style={HEADING_STYLE}>推荐推理引擎</h2>
       <p style={SUBTITLE_STYLE}>基于本机硬件自动匹配</p>
 
+      {rec.ready_primary ? (
+        <div className="ready-banner">
+          <strong>当前可运行首选</strong>
+          <span>{ENGINE_NAMES[rec.ready_primary.engine]} · {BACKEND_NAMES[rec.ready_primary.backend]}</span>
+        </div>
+      ) : (
+        <div className="warning-banner">
+          <strong>未检测到可直接运行的推理环境</strong>
+          <span>下面展示的是硬件兼容性建议，请先安装对应运行时。</span>
+        </div>
+      )}
+
       {/* Primary Card */}
       <div className="primary-card" style={{ borderColor: primaryColor }}>
         <div className="primary-badge" style={{ color: primaryColor }}>
-          ⭐ 首推方案 (Recommended)
+          理论最佳方案（硬件兼容性）
         </div>
         <div className="primary-row">
           <span className="primary-engine">
@@ -108,6 +126,26 @@ function RecommendationPanelInner({ hw, rec }: Props) {
           </ul>
         </div>
       )}
+
+      {rec.warnings.length > 0 && (
+        <div className="warning-banner warning-list" role="status">
+          <strong>检测提示</strong>
+          {rec.warnings.map((warning) => <span key={warning}>{warning}</span>)}
+        </div>
+      )}
+
+      <div className="card">
+        <div className="card-title">本机运行时可用性</div>
+        <div className="runtime-grid">
+          {hw.availability.map((item) => (
+            <div className="runtime-row" key={`${item.target.engine}-${item.target.backend}`}>
+              <span>{ENGINE_NAMES[item.target.engine]} · {BACKEND_NAMES[item.target.backend]}</span>
+              <strong className={`status-${item.status}`}>{AVAILABILITY_LABELS[item.status]}</strong>
+              <span title={item.evidence}>{item.evidence}</span>
+            </div>
+          ))}
+        </div>
+      </div>
 
       {/* Alternatives */}
       <div className="card">

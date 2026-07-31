@@ -3,7 +3,4 @@
 pub mod recommender;
 pub mod types;
 
-pub use recommender::{recommend, merge_recommendations};
-pub use types::{
-    BackendType, EngineBackendPair, EngineRecommendation, InferenceEngine,
-};
+pub use recommender::{merge_recommendations, recommend};

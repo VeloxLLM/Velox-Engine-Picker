@@ -62,7 +62,11 @@ function HardwarePanelInner({ hw }: Props) {
   return (
     <div>
       <h2 style={HEADING_STYLE}>硬件配置</h2>
-      <p style={SUBTITLE_STYLE}>以下信息由 sysinfo + wgpu 实时采集</p>
+      <p style={SUBTITLE_STYLE}>以下信息由 sysinfo + 平台原生 GPU API 实时采集</p>
+
+      {hw.detection_warnings.map((warning) => (
+        <div className="warning-banner" role="status" key={warning}>{warning}</div>
+      ))}
 
       {/* CPU */}
       <div className="card card-accent" style={{ borderLeftColor: "#3b82f6" }}>
@@ -71,9 +75,13 @@ function HardwarePanelInner({ hw }: Props) {
         <div style={FLEX_WRAP_STYLE}>
           <span className="chip">厂商：{hw.cpu.vendor}</span>
           <span className="chip">核心数：{hw.cpu.core_count}</span>
+          <span className="chip">逻辑处理器：{hw.cpu.logical_processor_count}</span>
           <span className="chip">频率：{hw.cpu.frequency} MHz</span>
           <span className="chip">架构：{hw.cpu.arch}</span>
           <span className="chip">品牌：{BRAND_LABELS[hw.cpu.brand]}</span>
+          {hw.cpu.instruction_sets.map((feature) => (
+            <span className="chip" key={feature}>{feature}</span>
+          ))}
         </div>
       </div>
 
@@ -109,7 +117,11 @@ function HardwarePanelInner({ hw }: Props) {
       ) : (
         hw.gpus.map((g, i) => {
           const vendorColor = VENDOR_COLORS[g.vendor];
-          const typeLabel = g.gpu_type === "Discrete" ? "独立显卡" : "集成显卡";
+          const typeLabel = g.gpu_type === "Discrete"
+            ? "独立显卡"
+            : g.gpu_type === "Integrated"
+              ? "集成显卡"
+              : "其他适配器";
           return (
             <div
               key={i}

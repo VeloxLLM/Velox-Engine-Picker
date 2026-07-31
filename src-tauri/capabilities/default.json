@@ -3,7 +3,6 @@
   "description": "Default capabilities for Velox Engine Picker",
   "windows": ["main"],
   "permissions": [
-    "core:default",
-    "shell:allow-open"
+    "core:default"
   ]
 }

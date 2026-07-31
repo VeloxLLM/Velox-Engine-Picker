@@ -310,6 +310,61 @@ body,
   line-height: 1.5;
 }
 
+.ready-banner,
+.warning-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.ready-banner {
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid #10b981;
+  color: #a7f3d0;
+}
+
+.warning-banner {
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid #f59e0b;
+  color: #fde68a;
+}
+
+.warning-list span + span {
+  margin-top: 3px;
+}
+
+.runtime-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.runtime-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) minmax(120px, auto) 2fr;
+  gap: 12px;
+  align-items: start;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.status-Ready { color: #34d399; }
+.status-CompatibleMissingRuntime { color: #fbbf24; }
+.status-Unsupported { color: #9ca3af; }
+.status-Unknown { color: #fb7185; }
+
+@media (max-width: 760px) {
+  .runtime-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}
+
 /* ===== Memory Tip ===== */
 .memory-tip {
   background: #362b10;

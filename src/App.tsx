@@ -16,7 +16,7 @@ function App() {
       <header className="top-bar">
         <h1 className="app-title">Velox Engine Picker</h1>
         <span className="version-badge">
-          v1 &middot; Windows only
+          {hw ? `${hw.platform.edition} · ${hw.platform.os}/${hw.platform.arch} · ${hw.platform.support_level}` : "正在识别版本"}
         </span>
         <div className="top-right">
           <button className="btn btn-primary" onClick={redetect} disabled={loading}>

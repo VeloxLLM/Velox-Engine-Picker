@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Velox Engine Picker">
+  <defs>
+    <linearGradient id="background" x1="64" y1="48" x2="448" y2="464" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2563eb" />
+      <stop offset="1" stop-color="#6d28d9" />
+    </linearGradient>
+  </defs>
+  <rect x="24" y="24" width="464" height="464" rx="108" fill="url(#background)" />
+  <path d="M104 142h78l74 196 74-196h78L294 394h-76L104 142Z" fill="#fff" />
+  <path d="M81 222h102l22 54H81c-15 0-27-12-27-27s12-27 27-27Z" fill="#bfdbfe" />
+  <path d="M331 222h100c15 0 27 12 27 27s-12 27-27 27H307l24-54Z" fill="#ddd6fe" />
+</svg>

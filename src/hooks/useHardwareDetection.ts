@@ -10,6 +10,18 @@ export interface HardwareDetectionState {
   redetect: () => void;
 }
 
+function readableError(error: unknown): string {
+  if (typeof error === "string") return error;
+  if (error && typeof error === "object" && "message" in error) {
+    return String((error as { message: unknown }).message);
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return "未知硬件检测错误";
+  }
+}
+
 export function useHardwareDetection(): HardwareDetectionState {
   const [hw, setHw] = useState<HardwareInfo | null>(null);
   const [rec, setRec] = useState<EngineRecommendation | null>(null);
@@ -28,7 +40,9 @@ export function useHardwareDetection(): HardwareDetectionState {
       setHw(hardware);
       setRec(recommendation);
     } catch (e) {
-      setError(String(e));
+      setHw(null);
+      setRec(null);
+      setError(readableError(e));
     } finally {
       setLoading(false);
     }

@@ -1,5 +1,7 @@
 # Dependencies
 node_modules/
+.npm-cache/
+.trae/
 
 # Vite build output
 dist/
@@ -9,7 +11,9 @@ dist/
 .env.local
 
 # Rust build artifacts
-/target/
+target/
+src-tauri/target/
+src-tauri/gen/
 **/*.rs.bk
 
 # IDE

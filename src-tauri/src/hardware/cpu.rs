@@ -54,10 +54,13 @@ impl CpuArch {
 pub struct CpuInfo {
     pub name: String,
     pub vendor: String,
+    /// 物理核心数；无法获取时回退为逻辑处理器数。
     pub core_count: usize,
+    pub logical_processor_count: usize,
     pub frequency: u64,
     pub brand: CpuBrand,
     pub arch: CpuArch,
+    pub instruction_sets: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -92,7 +95,8 @@ impl From<String> for CpuBrand {
 #[must_use]
 pub fn collect_cpu_info(sys: &System) -> CpuInfo {
     let cpus = sys.cpus();
-    let core_count = cpus.len().max(1);
+    let logical_processor_count = cpus.len().max(1);
+    let core_count = sys.physical_core_count().unwrap_or(logical_processor_count);
 
     let first_cpu = cpus.first();
     let name = first_cpu
@@ -110,19 +114,22 @@ pub fn collect_cpu_info(sys: &System) -> CpuInfo {
 
     let frequency = {
         let sum: u64 = cpus.iter().map(|c| c.frequency()).sum();
-        sum / core_count as u64
+        sum / logical_processor_count as u64
     };
 
     let brand = detect_brand(&name, &vendor);
     let arch = detect_arch();
+    let instruction_sets = detect_instruction_sets();
 
     CpuInfo {
         name,
         vendor,
         core_count,
+        logical_processor_count,
         frequency,
         brand,
         arch,
+        instruction_sets,
     }
 }
 
@@ -184,4 +191,28 @@ fn detect_arch() -> CpuArch {
     {
         CpuArch::Other
     }
+}
+
+#[must_use]
+fn detect_instruction_sets() -> Vec<String> {
+    let mut features = Vec::new();
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    {
+        for (name, available) in [
+            ("SSE4.2", std::is_x86_feature_detected!("sse4.2")),
+            ("AVX", std::is_x86_feature_detected!("avx")),
+            ("AVX2", std::is_x86_feature_detected!("avx2")),
+            ("AVX-512F", std::is_x86_feature_detected!("avx512f")),
+            ("FMA", std::is_x86_feature_detected!("fma")),
+        ] {
+            if available {
+                features.push(name.to_string());
+            }
+        }
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        features.push("NEON".to_string());
+    }
+    features
 }
