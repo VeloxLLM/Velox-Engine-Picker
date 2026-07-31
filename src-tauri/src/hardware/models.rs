@@ -67,6 +67,10 @@ pub async fn collect_online_models(hw: &HardwareInfo) -> OnlineModelCatalog {
         Err(error) => warnings.push(format!("LM Studio 在线目录读取失败: {error}")),
     }
 
+    finish_catalog(models, warnings)
+}
+
+fn finish_catalog(mut models: Vec<OnlineModelInfo>, warnings: Vec<String>) -> OnlineModelCatalog {
     let mut seen = HashSet::new();
     models.retain(|model| {
         seen.insert((
@@ -81,7 +85,6 @@ pub async fn collect_online_models(hw: &HardwareInfo) -> OnlineModelCatalog {
             .then_with(|| a.estimated_q4_gb.total_cmp(&b.estimated_q4_gb))
             .then_with(|| a.name.cmp(&b.name))
     });
-    models.truncate(80);
     OnlineModelCatalog { models, warnings }
 }
 
@@ -340,6 +343,38 @@ mod tests {
             .iter()
             .any(|model| model.name == "Granite 4.1" && model.parameter_label == "3B"));
         assert!(models.iter().any(|model| model.parameter_label == "8B"));
+    }
+
+    #[test]
+    fn combined_catalog_does_not_drop_the_second_source() {
+        let mut models = (0..80)
+            .map(|index| OnlineModelInfo {
+                name: format!("Ollama {index}"),
+                source: OnlineModelSource::Ollama,
+                parameter_label: "1B".into(),
+                estimated_q4_gb: 1.8,
+                fit: ModelFit::Gpu,
+                fit_reason: "test".into(),
+                url: format!("https://ollama.com/library/model-{index}"),
+            })
+            .collect::<Vec<_>>();
+        models.push(OnlineModelInfo {
+            name: "Granite".into(),
+            source: OnlineModelSource::LmStudio,
+            parameter_label: "3B".into(),
+            estimated_q4_gb: 2.9,
+            fit: ModelFit::Gpu,
+            fit_reason: "test".into(),
+            url: "https://lmstudio.ai/models/granite".into(),
+        });
+
+        let catalog = finish_catalog(models, Vec::new());
+
+        assert_eq!(catalog.models.len(), 81);
+        assert!(catalog
+            .models
+            .iter()
+            .any(|model| model.source == OnlineModelSource::LmStudio));
     }
 
     #[test]
