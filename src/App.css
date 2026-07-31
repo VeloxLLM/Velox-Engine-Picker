@@ -337,32 +337,31 @@ body,
   margin-top: 3px;
 }
 
-.runtime-grid {
+.gpu-summary-grid,
+.model-grid {
   display: grid;
-  gap: 8px;
-}
-
-.runtime-row {
-  display: grid;
-  grid-template-columns: minmax(150px, 1fr) minmax(120px, auto) 2fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
-  align-items: start;
-  padding: 8px;
-  background: rgba(255, 255, 255, 0.03);
-  border-radius: 4px;
-  font-size: 12px;
+  margin-bottom: 16px;
 }
 
-.status-Ready { color: #34d399; }
-.status-CompatibleMissingRuntime { color: #fbbf24; }
-.status-Unsupported { color: #9ca3af; }
-.status-Unknown { color: #fb7185; }
+.compact-card { margin-bottom: 0; }
+.muted { color: var(--text-muted); }
+.model-estimate-note { color: var(--text-muted); font-size: 12px; margin: -4px 0 12px; }
+.model-card { margin-bottom: 0; min-width: 0; }
+.model-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.model-card-heading strong { overflow-wrap: anywhere; }
+.model-fit { white-space: nowrap; border-radius: 999px; padding: 2px 8px; font-size: 11px; font-weight: 700; }
+.fit-Gpu { background: rgba(16, 185, 129, .15); color: #34d399; }
+.fit-Hybrid, .fit-Cpu { background: rgba(59, 130, 246, .15); color: #60a5fa; }
+.fit-InsufficientMemory { background: rgba(239, 68, 68, .15); color: #f87171; }
+.fit-Unknown { background: rgba(156, 163, 175, .15); color: #9ca3af; }
+.model-meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.model-meta span { background: rgba(255, 255, 255, .06); border-radius: 4px; padding: 2px 6px; font-size: 11px; }
+.model-card p { color: var(--text-muted); font-size: 12px; }
 
 @media (max-width: 760px) {
-  .runtime-row {
-    grid-template-columns: 1fr;
-    gap: 4px;
-  }
+  .gpu-summary-grid, .model-grid { grid-template-columns: 1fr; }
 }
 
 /* ===== Memory Tip ===== */

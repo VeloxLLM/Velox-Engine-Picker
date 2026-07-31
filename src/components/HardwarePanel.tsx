@@ -1,5 +1,5 @@
 import { memo, useMemo } from "react";
-import type { HardwareInfo, GpuVendor } from "../types";
+import type { HardwareInfo, GpuVendor, ModelFit } from "../types";
 
 interface Props {
   hw: HardwareInfo;
@@ -44,6 +44,13 @@ const MEM_HINT_STYLE = { fontSize: 12, color: "#888" } as const;
 const GPU_NAME_STYLE = { fontWeight: 600, fontSize: 15, marginBottom: 6 } as const;
 const GPU_META_STYLE = { fontSize: 11, color: "#666", marginTop: 4 } as const;
 const NO_GPU_TEXT_STYLE = { fontSize: 13, color: "#ccc", whiteSpace: "pre-line" } as const;
+const FIT_LABELS: Record<ModelFit, string> = {
+  Gpu: "适合 GPU",
+  Hybrid: "可尝试 GPU + 内存",
+  Cpu: "可尝试 CPU",
+  InsufficientMemory: "内存可能不足",
+  Unknown: "无法估算",
+};
 
 function HardwarePanelInner({ hw }: Props) {
   const memTotalGB = useMemo(() => (hw.memory.total / 1024).toFixed(1), [hw.memory.total]);
@@ -58,6 +65,8 @@ function HardwarePanelInner({ hw }: Props) {
     () => (memUsedPct > 85 ? "#ef4444" : memUsedPct > 60 ? "#f59e0b" : "#10b981"),
     [memUsedPct],
   );
+  const discreteGpus = useMemo(() => hw.gpus.filter((gpu) => gpu.gpu_type === "Discrete"), [hw.gpus]);
+  const integratedGpus = useMemo(() => hw.gpus.filter((gpu) => gpu.gpu_type === "Integrated"), [hw.gpus]);
 
   return (
     <div>
@@ -102,7 +111,18 @@ function HardwarePanelInner({ hw }: Props) {
       </div>
 
       {/* GPU list */}
-      <h3 style={SECTION_TITLE_STYLE}>显卡 / GPU（共 {hw.gpus.length} 个）</h3>
+      <h3 style={SECTION_TITLE_STYLE}>显卡 / GPU（实体设备 {hw.gpus.length} 个）</h3>
+
+      <div className="gpu-summary-grid">
+        <div className="card compact-card">
+          <div className="card-title">独立显卡（dGPU）</div>
+          {discreteGpus.length > 0 ? discreteGpus.map((gpu) => <div key={`${gpu.device_id}-${gpu.name}`}>{gpu.name}</div>) : <span className="muted">未检测到独立显卡</span>}
+        </div>
+        <div className="card compact-card">
+          <div className="card-title">集成显卡（iGPU）</div>
+          {integratedGpus.length > 0 ? integratedGpus.map((gpu) => <div key={`${gpu.device_id}-${gpu.name}`}>{gpu.name}</div>) : <span className="muted">未检测到 iGPU（可能未安装驱动或已在 BIOS 中禁用）</span>}
+        </div>
+      </div>
 
       {hw.gpus.length === 0 ? (
         <div className="card" style={{ borderLeftColor: "#f59e0b" }}>
@@ -144,6 +164,30 @@ function HardwarePanelInner({ hw }: Props) {
             </div>
           );
         })
+      )}
+
+      <h3 style={SECTION_TITLE_STYLE}>本地大语言模型（{hw.local_models.length} 个）</h3>
+      <p className="model-estimate-note">扫描 Ollama 与 LM Studio 的本地模型；结果仅按文件大小、显存和系统内存估算，不代表速度或最大上下文保证。</p>
+      {hw.model_scan_warnings.map((warning) => <div className="warning-banner" role="status" key={warning}>{warning}</div>)}
+      {hw.local_models.length === 0 ? (
+        <div className="card"><span className="muted">未在 Ollama 或 LM Studio 模型目录中发现主模型文件。</span></div>
+      ) : (
+        <div className="model-grid">
+          {hw.local_models.map((model) => (
+            <div className="card model-card" key={`${model.source}-${model.path}`}>
+              <div className="model-card-heading">
+                <strong title={model.path}>{model.name}</strong>
+                <span className={`model-fit fit-${model.fit}`}>{FIT_LABELS[model.fit]}</span>
+              </div>
+              <div className="model-meta">
+                <span>{model.source === "LmStudio" ? "LM Studio" : "Ollama"}</span>
+                <span>{(model.size_bytes / 1024 / 1024 / 1024).toFixed(1)} GB</span>
+                {model.quantization && <span>{model.quantization}</span>}
+              </div>
+              <p>{model.fit_reason}</p>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );

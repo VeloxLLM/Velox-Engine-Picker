@@ -5,7 +5,7 @@ Velox Engine Picker 是一个 Tauri + React + Rust 桌面工具，用于检测�
 - **当前可运行首选**：已经检测到所需驱动或运行时的方案。
 - **理论最佳方案**：硬件兼容，但可能仍需安装运行时的方案。
 
-项目不会下载、安装或执行第三方运行时，也不会上传硬件信息。
+项目不会下载、安装或执行第三方运行时，也不会上传硬件或本地模型信息。
 
 ## 平台分层
 
@@ -21,7 +21,8 @@ Velox Engine Picker 是一个 Tauri + React + Rust 桌面工具，用于检测�
 
 ### 硬件与平台检测
 
-- Windows 通过 DXGI 枚举适配器、过滤软件适配器，并读取真实专用显存。
+- Windows 通过 DXGI 枚举适配器，过滤软件、远程、虚拟和间接显示适配器，并读取真实专用显存。
+- 界面分别列出 dGPU 与 iGPU；未发现 iGPU 时会明确提示，而不是静默省略。
 - 无法取得显存时显示“未知”，不会根据显卡名称猜容量或套用低显存结论。
 - 显示 CPU 物理核心、逻辑处理器、架构和 SSE4.2/AVX/AVX2/AVX-512/FMA/NEON 等指令集。
 - GPU 未发现返回正常 CPU-only 结果；GPU 探测失败返回结构化错误，前端允许重试。
@@ -40,6 +41,15 @@ Velox Engine Picker 是一个 Tauri + React + Rust 桌面工具，用于检测�
 
 Windows v1 探测 OpenVINO、NVIDIA 驱动/CUDA、TensorRT、DirectML/D3D12、ROCm/HIP、llama.cpp 和 ONNX Runtime 的保守本地信号。检测到文件或命令只代表“具备运行条件信号”，不等价于所有模型均已验证。
 
+运行时信号仍用于生成“当前可运行首选”，但界面不再展示冗长的逐项运行时列表。
+
+### 本地模型扫描
+
+- 自动读取 `OLLAMA_MODELS`、Ollama 默认模型目录和 LM Studio 的 `downloadsFolder` / 默认模型目录。
+- Ollama 根据 manifest 识别模型层；LM Studio 识别 `.gguf` 主模型并排除 `mmproj` 等多模态辅助文件。
+- 按模型文件体积、独显显存和系统内存给出 GPU、GPU + 内存、CPU 或内存可能不足的保守估算。
+- 估算不代表推理速度、最大上下文或模型一定兼容；模型路径与扫描结果只保留在本机。
+
 ### 平台感知推荐
 
 - Windows AMD 不会仅凭厂商首推 ROCm；DirectML 是默认理论方案，ROCm 只有检测到有效环境时才进入可运行候选。
@@ -49,7 +59,7 @@ Windows v1 探测 OpenVINO、NVIDIA 驱动/CUDA、TensorRT、DirectML/D3D12、RO
 
 ## 界面状态
 
-界面覆盖首次加载、检测失败、重新检测、无 GPU、未知显存、运行时缺失、当前无可运行首选以及理论方案展示；支持键盘操作、窄窗口布局和高对比度状态标签。
+界面覆盖首次加载、检测失败、重新检测、无 GPU、未检测到 iGPU、未知显存、当前无可运行首选、本地模型估算以及理论方案展示；支持键盘操作、窄窗口布局和高对比度状态标签。
 
 Shell 插件和无用权限已移除，应用采用最小 capability 与 CSP；当前版本不需要打开外部链接。
 

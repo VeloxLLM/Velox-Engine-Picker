@@ -387,6 +387,8 @@ mod tests {
             },
             availability: vec![],
             detection_warnings: vec![],
+            local_models: vec![],
+            model_scan_warnings: vec![],
         }
     }
 
@@ -546,6 +548,8 @@ mod tests {
             },
             availability: vec![],
             detection_warnings: vec![],
+            local_models: vec![],
+            model_scan_warnings: vec![],
         };
         let rec = super::recommend(&hw);
         assert_eq!(rec.primary.engine, InferenceEngine::LlamaCpp);
@@ -589,6 +593,8 @@ mod tests {
             },
             availability: vec![],
             detection_warnings: vec![],
+            local_models: vec![],
+            model_scan_warnings: vec![],
         };
         let rec = super::recommend(&hw);
         assert_eq!(rec.primary.engine, InferenceEngine::LlamaCpp);

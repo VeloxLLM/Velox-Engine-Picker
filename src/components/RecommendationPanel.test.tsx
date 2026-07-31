@@ -24,6 +24,8 @@ const hw: HardwareInfo = {
     version: null,
     evidence: "未检测到 OpenVINO Runtime",
   }],
+  local_models: [],
+  model_scan_warnings: [],
 };
 
 const recommendation: EngineRecommendation = {
@@ -43,6 +45,7 @@ describe("RecommendationPanel", () => {
     render(<RecommendationPanel hw={hw} rec={recommendation} />);
     expect(screen.getByText("理论最佳方案（硬件兼容性）")).toBeTruthy();
     expect(screen.getByText("未检测到可直接运行的推理环境")).toBeTruthy();
-    expect(screen.getByText("兼容，缺少运行时")).toBeTruthy();
+    expect(screen.queryByText("本机运行时可用性")).toBeNull();
+    expect(screen.queryByText("兼容，缺少运行时")).toBeNull();
   });
 });

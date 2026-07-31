@@ -56,6 +56,21 @@ export interface HardwareInfo {
   platform: PlatformInfo;
   availability: EngineAvailability[];
   detection_warnings: string[];
+  local_models: LocalModelInfo[];
+  model_scan_warnings: string[];
+}
+
+export type LocalModelSource = "Ollama" | "LmStudio";
+export type ModelFit = "Gpu" | "Hybrid" | "Cpu" | "InsufficientMemory" | "Unknown";
+
+export interface LocalModelInfo {
+  name: string;
+  source: LocalModelSource;
+  path: string;
+  size_bytes: number;
+  quantization: string | null;
+  fit: ModelFit;
+  fit_reason: string;
 }
 
 export interface PlatformInfo {

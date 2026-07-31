@@ -182,10 +182,9 @@ pub fn collect_gpu_info() -> GpuDetectionResult {
 #[cfg(target_os = "windows")]
 fn collect_dxgi_gpu_info() -> Result<Vec<GpuInfo>, String> {
     use windows::Win32::Graphics::Dxgi::{
-        CreateDXGIFactory1, IDXGIFactory1, DXGI_ADAPTER_FLAG_SOFTWARE,
+        CreateDXGIFactory1, IDXGIFactory1, DXGI_ADAPTER_FLAG_REMOTE, DXGI_ADAPTER_FLAG_SOFTWARE,
     };
 
-    let wgpu_adapters = pollster::block_on(try_collect_gpu_info()).unwrap_or_default();
     let factory: IDXGIFactory1 =
         unsafe { CreateDXGIFactory1() }.map_err(|error| error.to_string())?;
     let mut results = Vec::new();
@@ -199,7 +198,9 @@ fn collect_dxgi_gpu_info() -> Result<Vec<GpuInfo>, String> {
         let desc = unsafe { adapter.GetDesc1() }.map_err(|error| error.to_string())?;
         index += 1;
 
-        if desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32 != 0 {
+        if desc.Flags & (DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32 | DXGI_ADAPTER_FLAG_REMOTE.0 as u32)
+            != 0
+        {
             continue;
         }
 
@@ -211,36 +212,19 @@ fn collect_dxgi_gpu_info() -> Result<Vec<GpuInfo>, String> {
                 .unwrap_or(desc.Description.len())],
         );
         let vendor = detect_vendor(desc.VendorId, &name);
-        let matched = wgpu_adapters.iter().find(|gpu| {
-            gpu.vendor == vendor
-                && (gpu.name.eq_ignore_ascii_case(&name)
-                    || gpu
-                        .name
-                        .to_ascii_lowercase()
-                        .contains(&name.to_ascii_lowercase())
-                    || name
-                        .to_ascii_lowercase()
-                        .contains(&gpu.name.to_ascii_lowercase()))
-        });
-        let gpu_type = matched.map_or_else(
-            || {
-                if desc.DedicatedVideoMemory > 512 * 1024 * 1024 {
-                    GpuType::Discrete
-                } else {
-                    GpuType::Integrated
-                }
-            },
-            |gpu| gpu.gpu_type.clone(),
-        );
-        let backend = matched.map_or(GpuBackend::Dx12, |gpu| gpu.backend.clone());
         let dedicated_mb = desc.DedicatedVideoMemory as u64 / 1024 / 1024;
+        if !is_physical_adapter(&vendor, &name, dedicated_mb) {
+            log::info!("忽略虚拟或显示专用适配器: {name}");
+            continue;
+        }
+        let gpu_type = classify_gpu(&vendor, &name, dedicated_mb);
 
         results.push(GpuInfo {
             name,
             vendor,
             gpu_type,
             vram: (dedicated_mb > 0).then_some(dedicated_mb),
-            backend,
+            backend: GpuBackend::Dx12,
             device_id: (desc.VendorId, desc.DeviceId),
         });
     }
@@ -248,6 +232,41 @@ fn collect_dxgi_gpu_info() -> Result<Vec<GpuInfo>, String> {
     Ok(results)
 }
 
+fn is_physical_adapter(vendor: &GpuVendor, name: &str, dedicated_mb: u64) -> bool {
+    let lower = name.to_ascii_lowercase();
+    let virtual_name = [
+        "virtual",
+        "indirect",
+        "remote",
+        "oray",
+        "spacedesk",
+        "parsec",
+        "iddsample",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker));
+    if virtual_name {
+        return false;
+    }
+    !matches!(vendor, GpuVendor::Other | GpuVendor::Microsoft) || dedicated_mb > 0
+}
+
+fn classify_gpu(vendor: &GpuVendor, name: &str, dedicated_mb: u64) -> GpuType {
+    match vendor {
+        GpuVendor::Nvidia => GpuType::Discrete,
+        GpuVendor::Intel if name.to_ascii_lowercase().contains("arc") || dedicated_mb > 512 => {
+            GpuType::Discrete
+        }
+        GpuVendor::Amd if dedicated_mb > 512 => GpuType::Discrete,
+        GpuVendor::Intel | GpuVendor::Amd | GpuVendor::Apple | GpuVendor::Qualcomm => {
+            GpuType::Integrated
+        }
+        _ if dedicated_mb > 512 => GpuType::Discrete,
+        _ => GpuType::Other,
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
 async fn try_collect_gpu_info() -> Option<Vec<GpuInfo>> {
     #[cfg(feature = "v3")]
     let selected_backends = wgpu::Backends::PRIMARY;
@@ -332,6 +351,7 @@ fn detect_vendor(vendor_id: u32, name: &str) -> GpuVendor {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
 fn map_backend(b: wgpu::Backend) -> GpuBackend {
     match b {
         wgpu::Backend::Vulkan => GpuBackend::Vulkan,
@@ -340,5 +360,44 @@ fn map_backend(b: wgpu::Backend) -> GpuBackend {
         wgpu::Backend::Gl => GpuBackend::Gl,
         wgpu::Backend::BrowserWebGpu => GpuBackend::BrowserWebGpu,
         _ => GpuBackend::Other,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn filters_oray_indirect_display_adapter() {
+        assert!(!is_physical_adapter(
+            &GpuVendor::Other,
+            "OrayIddDriver Device",
+            0
+        ));
+    }
+
+    #[test]
+    fn keeps_nvidia_physical_adapter() {
+        assert!(is_physical_adapter(
+            &GpuVendor::Nvidia,
+            "NVIDIA GeForce RTX 3060 Ti",
+            8192
+        ));
+        assert_eq!(
+            classify_gpu(&GpuVendor::Nvidia, "NVIDIA GeForce RTX 3060 Ti", 8192),
+            GpuType::Discrete
+        );
+    }
+
+    #[test]
+    fn classifies_intel_integrated_and_arc_discrete() {
+        assert_eq!(
+            classify_gpu(&GpuVendor::Intel, "Intel UHD Graphics", 128),
+            GpuType::Integrated
+        );
+        assert_eq!(
+            classify_gpu(&GpuVendor::Intel, "Intel Arc A770", 16384),
+            GpuType::Discrete
+        );
     }
 }

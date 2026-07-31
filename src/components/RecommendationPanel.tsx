@@ -46,13 +46,6 @@ const FLEX_GAP8_MB10_STYLE = { display: "flex", gap: 8, marginBottom: 10 } as co
 const REASON_ITEM_STYLE = { display: "flex", gap: 8, marginBottom: 4, fontSize: 13 } as const;
 const REASON_DOT_STYLE = { color: "#10b981" } as const;
 const MUTED_STYLE = { color: "#888" } as const;
-const AVAILABILITY_LABELS = {
-  Ready: "当前可用",
-  CompatibleMissingRuntime: "兼容，缺少运行时",
-  Unsupported: "不支持",
-  Unknown: "未知",
-} as const;
-
 type CheatRow = [InferenceEngine, BackendType, string, boolean];
 
 function RecommendationPanelInner({ hw, rec }: Props) {
@@ -133,19 +126,6 @@ function RecommendationPanelInner({ hw, rec }: Props) {
           {rec.warnings.map((warning) => <span key={warning}>{warning}</span>)}
         </div>
       )}
-
-      <div className="card">
-        <div className="card-title">本机运行时可用性</div>
-        <div className="runtime-grid">
-          {hw.availability.map((item) => (
-            <div className="runtime-row" key={`${item.target.engine}-${item.target.backend}`}>
-              <span>{ENGINE_NAMES[item.target.engine]} · {BACKEND_NAMES[item.target.backend]}</span>
-              <strong className={`status-${item.status}`}>{AVAILABILITY_LABELS[item.status]}</strong>
-              <span title={item.evidence}>{item.evidence}</span>
-            </div>
-          ))}
-        </div>
-      </div>
 
       {/* Alternatives */}
       <div className="card">
