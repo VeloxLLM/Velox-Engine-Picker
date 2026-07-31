@@ -365,7 +365,12 @@ body,
 .model-meta span { background: rgba(255, 255, 255, .06); border-radius: 4px; padding: 2px 6px; font-size: 11px; }
 .model-card p { color: var(--text-muted); font-size: 12px; }
 .model-source-url { color: #7c86a2; font-size: 10px; margin-top: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.online-model-count { color: var(--text-muted); font-size: 12px; margin-bottom: 10px; }
+.online-model-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 10px; }
+.online-model-count { color: var(--text-muted); font-size: 12px; }
+.quick-model-filters { display: flex; flex-wrap: wrap; gap: 5px; }
+.quick-model-filters button { border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); border-radius: 999px; padding: 3px 9px; font-size: 12px; cursor: pointer; }
+.quick-model-filters button:hover { color: var(--text); border-color: var(--accent); }
+.quick-model-filters button.active { color: #fff; background: var(--accent); border-color: var(--accent); }
 .section-heading-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 16px; }
 .section-heading-row h2 { font-size: 20px; margin-bottom: 4px; }
 .section-heading-row p { color: var(--text-muted); font-size: 12px; }

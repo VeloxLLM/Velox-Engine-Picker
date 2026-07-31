@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HardwareInfo, OnlineModelCatalog } from "../types";
 import OnlineModelsPanel from "./OnlineModelsPanel";
 
@@ -25,16 +25,36 @@ const catalog: OnlineModelCatalog = {
 
 describe("OnlineModelsPanel", () => {
   beforeEach(() => invokeMock.mockReset().mockResolvedValue(catalog));
+  afterEach(cleanup);
 
   it("loads both official catalogs and filters by source", async () => {
     render(<OnlineModelsPanel hw={hw} />);
 
-    await waitFor(() => expect(screen.getByText("Qwen")).toBeTruthy());
-    expect(screen.getByText("Granite")).toBeTruthy();
+    await waitFor(() => expect(screen.getByText("Qwen", { selector: "strong" })).toBeTruthy());
+    expect(screen.getByText("Granite", { selector: "strong" })).toBeTruthy();
     expect(invokeMock).toHaveBeenCalledWith("get_online_models", { hw });
 
     fireEvent.click(screen.getByRole("button", { name: "LM Studio" }));
-    expect(screen.queryByText("Qwen")).toBeNull();
-    expect(screen.getByText("Granite")).toBeTruthy();
+    expect(screen.queryByText("Qwen", { selector: "strong" })).toBeNull();
+    expect(screen.getByText("Granite", { selector: "strong" })).toBeTruthy();
+  });
+
+  it("offers model-family shortcuts beside the result count", async () => {
+    render(<OnlineModelsPanel hw={hw} />);
+
+    await waitFor(() => expect(screen.getByText("Qwen", { selector: "strong" })).toBeTruthy());
+    expect(screen.getByText("共 2 个可选规格")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Gemma" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "DeepSeek" })).toBeTruthy();
+
+    const graniteFilter = screen.getByRole("button", { name: "Granite" });
+    fireEvent.click(graniteFilter);
+    expect(screen.queryByText("Qwen", { selector: "strong" })).toBeNull();
+    expect(screen.getByText("共 1 个可选规格")).toBeTruthy();
+    expect(graniteFilter.getAttribute("aria-pressed")).toBe("true");
+
+    fireEvent.click(graniteFilter);
+    expect(screen.getByText("Qwen", { selector: "strong" })).toBeTruthy();
+    expect(screen.getByText("共 2 个可选规格")).toBeTruthy();
   });
 });

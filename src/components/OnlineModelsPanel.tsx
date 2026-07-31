@@ -10,6 +10,7 @@ const FIT_LABELS: Record<ModelFit, string> = {
   Hybrid: "GPU + 内存",
   Cpu: "CPU / 内存",
 };
+const QUICK_MODEL_FILTERS = ["Qwen", "Gemma", "DeepSeek", "Granite"] as const;
 
 function OnlineModelsPanelInner({ hw }: Props) {
   const [catalog, setCatalog] = useState<OnlineModelCatalog | null>(null);
@@ -40,6 +41,10 @@ function OnlineModelsPanelInner({ hw }: Props) {
     );
   }, [catalog, query, source]);
 
+  const toggleQuickFilter = (modelName: string) => {
+    setQuery((current) => current.trim().toLocaleLowerCase() === modelName.toLocaleLowerCase() ? "" : modelName);
+  };
+
   return (
     <div>
       <div className="section-heading-row">
@@ -69,28 +74,45 @@ function OnlineModelsPanelInner({ hw }: Props) {
 
       {loading && !catalog ? (
         <div className="loading"><div className="loading-spinner" /><p>正在读取官方在线目录...</p></div>
-      ) : visibleModels.length === 0 ? (
-        <div className="card muted">没有找到符合当前筛选条件且可能运行的在线模型。</div>
       ) : (
         <>
-          <div className="online-model-count">共 {visibleModels.length} 个可选规格</div>
-          <div className="model-grid">
-            {visibleModels.map((model) => (
-              <article className="card model-card" key={`${model.source}-${model.name}-${model.parameter_label}`}>
-                <div className="model-card-heading">
-                  <strong>{model.name}</strong>
-                  <span className={`model-fit fit-${model.fit}`}>{FIT_LABELS[model.fit]}</span>
-                </div>
-                <div className="model-meta">
-                  <span>{model.source === "LmStudio" ? "LM Studio" : "Ollama"}</span>
-                  <span>{model.parameter_label}</span>
-                  <span>Q4 约 {model.estimated_q4_gb.toFixed(1)} GB</span>
-                </div>
-                <p>{model.fit_reason}</p>
-                <div className="model-source-url" title={model.url}>{model.url}</div>
-              </article>
-            ))}
+          <div className="online-model-summary">
+            <span className="online-model-count">共 {visibleModels.length} 个可选规格</span>
+            <div className="quick-model-filters" aria-label="模型快捷筛选">
+              {QUICK_MODEL_FILTERS.map((modelName) => (
+                <button
+                  type="button"
+                  key={modelName}
+                  className={query.trim().toLocaleLowerCase() === modelName.toLocaleLowerCase() ? "active" : ""}
+                  aria-pressed={query.trim().toLocaleLowerCase() === modelName.toLocaleLowerCase()}
+                  onClick={() => toggleQuickFilter(modelName)}
+                >
+                  {modelName}
+                </button>
+              ))}
+            </div>
           </div>
+          {visibleModels.length === 0 ? (
+            <div className="card muted">没有找到符合当前筛选条件且可能运行的在线模型。</div>
+          ) : (
+            <div className="model-grid">
+              {visibleModels.map((model) => (
+                <article className="card model-card" key={`${model.source}-${model.name}-${model.parameter_label}`}>
+                  <div className="model-card-heading">
+                    <strong>{model.name}</strong>
+                    <span className={`model-fit fit-${model.fit}`}>{FIT_LABELS[model.fit]}</span>
+                  </div>
+                  <div className="model-meta">
+                    <span>{model.source === "LmStudio" ? "LM Studio" : "Ollama"}</span>
+                    <span>{model.parameter_label}</span>
+                    <span>Q4 约 {model.estimated_q4_gb.toFixed(1)} GB</span>
+                  </div>
+                  <p>{model.fit_reason}</p>
+                  <div className="model-source-url" title={model.url}>{model.url}</div>
+                </article>
+              ))}
+            </div>
+          )}
         </>
       )}
     </div>
