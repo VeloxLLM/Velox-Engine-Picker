@@ -1,6 +1,8 @@
 //! GPU / iGPU 信息检测（基于 wgpu 适配器枚举）
 
 use serde::{Deserialize, Serialize};
+#[cfg(target_os = "windows")]
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -187,7 +189,13 @@ fn collect_dxgi_gpu_info() -> Result<Vec<GpuInfo>, String> {
 
     let factory: IDXGIFactory1 =
         unsafe { CreateDXGIFactory1() }.map_err(|error| error.to_string())?;
+    let physical_adapter_counts = collect_present_pci_display_adapters().unwrap_or_else(|error| {
+        log::warn!("Windows 物理显示设备枚举失败，将仅使用 DXGI 结果: {error}");
+        HashMap::new()
+    });
+    let mut kept_adapter_counts = HashMap::new();
     let mut results = Vec::new();
+    let mut seen_adapter_luids = HashSet::new();
     let mut index = 0;
 
     loop {
@@ -197,6 +205,12 @@ fn collect_dxgi_gpu_info() -> Result<Vec<GpuInfo>, String> {
         };
         let desc = unsafe { adapter.GetDesc1() }.map_err(|error| error.to_string())?;
         index += 1;
+
+        let adapter_luid = (desc.AdapterLuid.HighPart, desc.AdapterLuid.LowPart);
+        if !is_new_dxgi_adapter(&mut seen_adapter_luids, adapter_luid) {
+            log::info!("忽略 DXGI 重复适配器: LUID={adapter_luid:?}");
+            continue;
+        }
 
         if desc.Flags & (DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32 | DXGI_ADAPTER_FLAG_REMOTE.0 as u32)
             != 0
@@ -217,6 +231,18 @@ fn collect_dxgi_gpu_info() -> Result<Vec<GpuInfo>, String> {
             log::info!("忽略虚拟或显示专用适配器: {name}");
             continue;
         }
+        if is_excess_dxgi_adapter(
+            &physical_adapter_counts,
+            &mut kept_adapter_counts,
+            (desc.VendorId, desc.DeviceId),
+        ) {
+            log::info!(
+                "忽略超过 Windows 物理设备数量的 DXGI 重复适配器: {name} ({:04x}:{:04x})",
+                desc.VendorId,
+                desc.DeviceId
+            );
+            continue;
+        }
         let gpu_type = classify_gpu(&vendor, &name, dedicated_mb);
 
         results.push(GpuInfo {
@@ -230,6 +256,99 @@ fn collect_dxgi_gpu_info() -> Result<Vec<GpuInfo>, String> {
     }
 
     Ok(results)
+}
+
+#[cfg(target_os = "windows")]
+fn collect_present_pci_display_adapters() -> Result<HashMap<(u32, u32), usize>, String> {
+    use windows::core::PCWSTR;
+    use windows::Win32::Devices::DeviceAndDriverInstallation::{
+        SetupDiDestroyDeviceInfoList, SetupDiEnumDeviceInfo, SetupDiGetClassDevsW,
+        SetupDiGetDeviceInstanceIdW, DIGCF_PRESENT, GUID_DEVCLASS_DISPLAY, SP_DEVINFO_DATA,
+    };
+    use windows::Win32::Foundation::HWND;
+
+    let device_info_set = unsafe {
+        SetupDiGetClassDevsW(
+            Some(&GUID_DEVCLASS_DISPLAY),
+            PCWSTR::null(),
+            HWND::default(),
+            DIGCF_PRESENT,
+        )
+    }
+    .map_err(|error| error.to_string())?;
+
+    let mut counts = HashMap::new();
+    let mut index = 0;
+    loop {
+        let mut device_info = SP_DEVINFO_DATA {
+            cbSize: std::mem::size_of::<SP_DEVINFO_DATA>() as u32,
+            ..Default::default()
+        };
+        if unsafe { SetupDiEnumDeviceInfo(device_info_set, index, &mut device_info) }.is_err() {
+            break;
+        }
+        index += 1;
+
+        let mut instance_id = [0_u16; 512];
+        if unsafe {
+            SetupDiGetDeviceInstanceIdW(device_info_set, &device_info, Some(&mut instance_id), None)
+        }
+        .is_err()
+        {
+            continue;
+        }
+        let length = instance_id
+            .iter()
+            .position(|character| *character == 0)
+            .unwrap_or(instance_id.len());
+        let instance_id = String::from_utf16_lossy(&instance_id[..length]);
+        if let Some(signature) = parse_pci_adapter_signature(&instance_id) {
+            *counts.entry(signature).or_insert(0) += 1;
+        }
+    }
+
+    let _ = unsafe { SetupDiDestroyDeviceInfoList(device_info_set) };
+    Ok(counts)
+}
+
+fn parse_pci_adapter_signature(instance_id: &str) -> Option<(u32, u32)> {
+    let normalized = instance_id.to_ascii_uppercase();
+    if !normalized.starts_with("PCI\\") {
+        return None;
+    }
+    let vendor_id = normalized
+        .split(['&', '\\'])
+        .find_map(|part| part.strip_prefix("VEN_"))
+        .and_then(|value| u32::from_str_radix(value, 16).ok())?;
+    let device_id = normalized
+        .split(['&', '\\'])
+        .find_map(|part| part.strip_prefix("DEV_"))
+        .and_then(|value| u32::from_str_radix(value, 16).ok())?;
+    Some((vendor_id, device_id))
+}
+
+fn is_excess_dxgi_adapter(
+    physical_adapter_counts: &HashMap<(u32, u32), usize>,
+    kept_adapter_counts: &mut HashMap<(u32, u32), usize>,
+    signature: (u32, u32),
+) -> bool {
+    let Some(physical_count) = physical_adapter_counts.get(&signature) else {
+        return false;
+    };
+    let kept_count = kept_adapter_counts.entry(signature).or_insert(0);
+    if *kept_count >= *physical_count {
+        return true;
+    }
+    *kept_count += 1;
+    false
+}
+
+#[cfg(target_os = "windows")]
+fn is_new_dxgi_adapter(
+    seen_adapter_luids: &mut HashSet<(i32, u32)>,
+    adapter_luid: (i32, u32),
+) -> bool {
+    seen_adapter_luids.insert(adapter_luid)
 }
 
 fn is_physical_adapter(vendor: &GpuVendor, name: &str, dedicated_mb: u64) -> bool {
@@ -387,6 +506,42 @@ mod tests {
             classify_gpu(&GpuVendor::Nvidia, "NVIDIA GeForce RTX 3060 Ti", 8192),
             GpuType::Discrete
         );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn duplicate_dxgi_luid_is_only_kept_once() {
+        let mut seen = HashSet::new();
+        assert!(is_new_dxgi_adapter(&mut seen, (42, 7)));
+        assert!(!is_new_dxgi_adapter(&mut seen, (42, 7)));
+        assert!(is_new_dxgi_adapter(&mut seen, (42, 8)));
+    }
+
+    #[test]
+    fn parses_windows_pci_display_instance_id() {
+        assert_eq!(
+            parse_pci_adapter_signature(
+                r"PCI\VEN_10DE&DEV_2489&SUBSYS_405A1458&REV_A1\4&739B9B0&0&0016"
+            ),
+            Some((0x10DE, 0x2489))
+        );
+        assert_eq!(parse_pci_adapter_signature(r"ROOT\DISPLAY\0000"), None);
+    }
+
+    #[test]
+    fn caps_dxgi_duplicates_to_present_physical_device_count() {
+        let physical = HashMap::from([((0x10DE, 0x2489), 1)]);
+        let mut kept = HashMap::new();
+        assert!(!is_excess_dxgi_adapter(
+            &physical,
+            &mut kept,
+            (0x10DE, 0x2489)
+        ));
+        assert!(is_excess_dxgi_adapter(
+            &physical,
+            &mut kept,
+            (0x10DE, 0x2489)
+        ));
     }
 
     #[test]
