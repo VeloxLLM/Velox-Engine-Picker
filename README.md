@@ -1,66 +1,111 @@
 # Velox Engine Picker
 
-Velox Engine Picker 是一个 Tauri + React + Rust 桌面工具，用于检测本机硬件与常见推理运行时，并分别给出：
+Velox Engine Picker 是一个 Tauri + React + Rust 桌面工具，用于检测本机硬件、平台和常见推理运行时，并分别给出：
 
-- **理论最佳方案**：硬件兼容情况下的推荐引擎与后端。
-- **当前可运行首选**：已经检测到所需驱动和运行时的方案。
+- **当前可运行首选**：已经检测到所需驱动或运行时的方案。
+- **理论最佳方案**：硬件兼容，但可能仍需安装运行时的方案。
 
-项目地址：[github.com/VeloxLLM/Velox-Engine-Picker](https://github.com/VeloxLLM/Velox-Engine-Picker)
+项目不会下载、安装或执行第三方运行时，也不会上传硬件信息。
 
-## 平台支持
+## 平台分层
 
-| Feature | 平台 | 状态 |
+| Feature | 平台 | 发布状态 |
 | --- | --- | --- |
 | `v1`（默认） | Windows x64 | 稳定首发目标 |
 | `v2` | Windows、macOS x64/ARM64 | 实验性 |
 | `v3` | Windows、macOS、Linux，含 ARM | 实验性 |
 
-非法的平台/feature 组合会在编译时给出错误。v2/v3 通过 CI 做编译检查，但不代表已经完成全部真实硬件验证。
+非法平台/feature 组合会在编译期失败。v2/v3 在原生 CI runner 做编译和单元测试，但在完成对应真实硬件验收前不声明稳定支持。
 
-## 已实现能力
+## 已实现
 
-- Windows 使用 DXGI 枚举真实图形适配器、过滤软件适配器并读取专用显存；无法读取时明确显示“未知”。
-- 展示 CPU 物理核心、逻辑处理器、架构和 AVX/AVX2/AVX-512/NEON 等指令集。
-- 区分 GPU 未发现和 GPU 检测失败。
-- 探测 OpenVINO、CUDA/NVIDIA 驱动、TensorRT、DirectML、ROCm/HIP 和 llama.cpp 的本地信号。
-- 运行时状态分为 `Ready`、`CompatibleMissingRuntime`、`Unsupported`、`Unknown`。
-- 推荐规则按操作系统过滤；Windows AMD 不会仅凭厂商直接首推 ROCm。
+### 硬件与平台检测
 
-运行时探测是保守的本地检查，不会执行或自动安装第三方程序。检测到文件也不等价于已经验证所有模型都能运行。
+- Windows 通过 DXGI 枚举适配器、过滤软件适配器，并读取真实专用显存。
+- 无法取得显存时显示“未知”，不会根据显卡名称猜容量或套用低显存结论。
+- 显示 CPU 物理核心、逻辑处理器、架构和 SSE4.2/AVX/AVX2/AVX-512/FMA/NEON 等指令集。
+- GPU 未发现返回正常 CPU-only 结果；GPU 探测失败返回结构化错误，前端允许重试。
+- 检测在后台线程执行，不阻塞 UI 主线程。
 
-## 开发
+### 运行时可用性
 
-要求：Node.js 20 LTS、Rust stable、Windows 上的 Visual Studio C++ Build Tools。
+每个后端使用四级状态：
+
+| 状态 | 含义 |
+| --- | --- |
+| `Ready` | 硬件和所需驱动/运行时均检测到 |
+| `CompatibleMissingRuntime` | 硬件兼容，但软件尚未检测到 |
+| `Unsupported` | 当前平台或硬件不支持 |
+| `Unknown` | 检测失败，不能武断推荐 |
+
+Windows v1 探测 OpenVINO、NVIDIA 驱动/CUDA、TensorRT、DirectML/D3D12、ROCm/HIP、llama.cpp 和 ONNX Runtime 的保守本地信号。检测到文件或命令只代表“具备运行条件信号”，不等价于所有模型均已验证。
+
+### 平台感知推荐
+
+- Windows AMD 不会仅凭厂商首推 ROCm；DirectML 是默认理论方案，ROCm 只有检测到有效环境时才进入可运行候选。
+- DirectML 不会出现在非 Windows 平台。
+- NVIDIA 未知显存不会被当作低显存。
+- Intel 核显、NVIDIA 已知/未知显存、AMD Windows、CPU-only、运行时缺失、探测失败和 v1/v2/v3 规则均由固定夹具或原生 CI 覆盖。
+
+## 界面状态
+
+界面覆盖首次加载、检测失败、重新检测、无 GPU、未知显存、运行时缺失、当前无可运行首选以及理论方案展示；支持键盘操作、窄窗口布局和高对比度状态标签。
+
+Shell 插件和无用权限已移除，应用采用最小 capability 与 CSP；当前版本不需要打开外部链接。
+
+## 开发与验证
+
+固定环境：Node.js 20 LTS、Rust stable `1.97.1`。Windows 原生构建需要 Visual Studio C++ Build Tools。
 
 ```powershell
 npm ci
 npm test
 npm run build
 
-# Windows x64 稳定版
-cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --features v1
-npm run tauri dev -- --features v1
+cargo fmt --manifest-path src-tauri\Cargo.toml -- --check
+cargo clippy --locked --manifest-path src-tauri\Cargo.toml `
+  --no-default-features --features v1 --all-targets -- -D warnings
+cargo test --locked --manifest-path src-tauri\Cargo.toml `
+  --no-default-features --features v1
+
+npm run tauri build -- --features v1
 ```
 
-实验版本：
+实验版检查：
 
 ```powershell
-cargo check --manifest-path src-tauri/Cargo.toml --no-default-features --features v2
-cargo check --manifest-path src-tauri/Cargo.toml --no-default-features --features v3
+cargo test --locked --manifest-path src-tauri\Cargo.toml --no-default-features --features v2
+cargo test --locked --manifest-path src-tauri\Cargo.toml --no-default-features --features v3
 ```
 
-## 发布验收
+`package-lock.json` 和 `src-tauri/Cargo.lock` 均已提交。CI 将 Windows v1 前端、Rust 测试和 Tauri 构建作为门禁；macOS v2 与 Linux v3 使用对应原生 runner 做实验性检查。
 
-- 自动化：前端组件测试、Rust 单元测试、Clippy、各 feature 编译检查、Windows Tauri 构建。
-- 人工：至少验证 Intel 核显和 NVIDIA 独显；AMD 在完成实机验证前保持“未完整验证”标记。
-- 无签名证书时仅发布明确标注的 unsigned prerelease。
+## 发布
 
-## 当前限制与路线图
+Tauri 配置显式启用 Windows MSI/NSIS，Windows MSVC 构建采用静态 CRT。推送 `v*` 标签会构建两种安装包、生成 `SHA256SUMS.txt`，并创建 unsigned prerelease。发布前仍需人工覆盖：
 
-- v2/v3 仍是实验性支持。
-- 尚未按模型规模、量化格式和上下文长度精确估算内存。
-- Markdown/JSON 报告导出与可复现性能基准留待后续版本。
-- 软件运行时版本识别目前以路径和环境信号为主，后续会增加更精确的版本查询。
+1. Intel 核显机器。
+2. NVIDIA 独显机器。
+3. AMD 机器；无法取得时必须标注“未实机验证”。
+4. 干净 Windows x64 环境的安装、启动、重新检测和卸载。
+
+没有代码签名证书时不得把 unsigned prerelease 描述为正式签名稳定版。
+
+### 2026-08-01 本机验证记录
+
+- 前端组件/Hook 测试与生产构建通过；生产依赖 `npm audit --omit=dev` 为 0 个已知漏洞。
+- Windows v1、v2、v3 固定夹具测试和 v1 严格 Clippy 通过。
+- Windows v1 静态 CRT Release 构建通过；PE 依赖检查不包含 `VCRUNTIME` 或 `MSVCP` DLL。
+- WiX MSI 与 NSIS setup 均已实际生成并计算 SHA-256。
+
+上述记录不能替代 Intel/NVIDIA/AMD 三类真实机器和干净 Windows 安装/卸载验收，因此当前标签发布仍保持 unsigned prerelease。
+
+## 已知限制与路线图
+
+- v2/v3 仍为实验性。
+- 当前不运行自动性能基准，避免把一次短测当作通用引擎排名。
+- 内存建议仍是保守区间；后续将允许输入模型规模、量化格式和上下文长度。
+- 后续计划导出 Markdown/JSON 硬件报告，并增加官方运行时安装链接；首版不会自动安装第三方组件。
 
 ## License
 

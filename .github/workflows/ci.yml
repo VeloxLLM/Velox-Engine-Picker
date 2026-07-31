@@ -35,7 +35,14 @@ jobs:
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --no-default-features --features v1 -- -D warnings
       - run: cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --features v1
       - run: npm run build
-      - run: npm run tauri build -- --no-bundle
+      - run: npm run tauri build -- --features v1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-v1-installers
+          path: |
+            src-tauri/target/release/bundle/msi/*
+            src-tauri/target/release/bundle/nsis/*
+          if-no-files-found: error
 
   macos-v2-experimental:
     runs-on: macos-latest
