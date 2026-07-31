@@ -1,0 +1,350 @@
+/* ===== Reset & Base ===== */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --bg: #1a1a2e;
+  --surface: #16213e;
+  --surface2: #0f3460;
+  --text: #e0e0e0;
+  --text-muted: #888;
+  --accent: #5850ec;
+  --accent-hover: #6c63ff;
+  --border: #2a2a4a;
+  --success: #10b981;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+  --radius: 8px;
+  --radius-lg: 12px;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* ===== Layout ===== */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.top-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 20px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.app-title {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.version-badge {
+  display: inline-block;
+  padding: 2px 12px;
+  border-radius: 14px;
+  background: #3b82f6;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+.top-right {
+  margin-left: auto;
+}
+
+.layout {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* ===== Sidebar ===== */
+.sidebar {
+  width: 170px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+}
+
+.tab-btn {
+  display: block;
+  width: 100%;
+  padding: 10px 14px;
+  margin-bottom: 4px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s;
+}
+
+.tab-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.tab-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.sidebar-footer {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+/* ===== Content ===== */
+.content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+}
+
+.content-inner {
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+/* ===== Common ===== */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 18px;
+  border: none;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.loading {
+  text-align: center;
+  padding: 60px 0;
+  color: var(--text-muted);
+  font-size: 16px;
+}
+
+.error-banner {
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  border-radius: var(--radius);
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  font-size: 13px;
+}
+
+/* ===== Card ===== */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  margin-bottom: 12px;
+}
+
+.card-accent {
+  border-left: 4px solid var(--accent);
+}
+
+.card-title {
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ===== Chip ===== */
+.chip {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 12px;
+  background: #222;
+  border: 1px solid #444;
+  font-size: 11px;
+  color: #ccc;
+  white-space: nowrap;
+}
+
+.chip + .chip {
+  margin-left: 6px;
+}
+
+/* ===== Grid / Table ===== */
+.table-grid {
+  display: grid;
+  gap: 6px;
+}
+
+.table-row {
+  display: grid;
+  grid-template-columns: 30px 1fr 1fr 1fr;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.table-row.header {
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.table-row.striped:nth-child(even) {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+/* ===== Progress Bar ===== */
+.progress-bar {
+  height: 10px;
+  border-radius: 5px;
+  background: #333;
+  overflow: hidden;
+  margin: 6px 0 2px;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 5px;
+  transition: width 0.3s;
+}
+
+/* ===== Primary Recommendation ===== */
+.primary-card {
+  background: #1e1e3a;
+  border: 2px solid var(--accent);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+.primary-badge {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+  margin-bottom: 8px;
+}
+
+.primary-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.primary-engine {
+  font-size: 26px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.primary-sep {
+  width: 1px;
+  height: 28px;
+  background: var(--border);
+}
+
+.primary-backend {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.primary-desc {
+  font-size: 13px;
+  color: #ccc;
+  line-height: 1.5;
+}
+
+/* ===== Memory Tip ===== */
+.memory-tip {
+  background: #362b10;
+  border: 1px solid #ca8a04;
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: #facc15;
+}
+
+.memory-tip strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+/* ===== Cheat Sheet ===== */
+.cheat-sheet summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 14px;
+  padding: 8px 0;
+  color: var(--text);
+}
+
+.cheat-sheet[open] summary {
+  margin-bottom: 8px;
+}
+
+/* ===== GPU Vendor Colors ===== */
+.gpu-vendor-Nvidia {
+  color: #76b900;
+}
+.gpu-vendor-Amd {
+  color: #ed1c24;
+}
+.gpu-vendor-Intel {
+  color: #0071c5;
+}
+.gpu-vendor-Apple {
+  color: #a8a8a8;
+}
+.gpu-vendor-Qualcomm {
+  color: #3256d6;
+}
