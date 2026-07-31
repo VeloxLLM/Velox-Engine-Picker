@@ -24,6 +24,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::detect_hardware,
             commands::get_recommendation,
+            commands::get_online_models,
             commands::merge_recommendations_cmd,
         ])
         .run(tauri::generate_context!())

@@ -24,8 +24,6 @@ const hw: HardwareInfo = {
     version: null,
     evidence: "未检测到 OpenVINO Runtime",
   }],
-  local_models: [],
-  model_scan_warnings: [],
 };
 
 const recommendation: EngineRecommendation = {

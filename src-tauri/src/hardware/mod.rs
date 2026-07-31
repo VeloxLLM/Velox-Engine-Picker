@@ -14,7 +14,7 @@ pub use cpu::CpuBrand;
 pub use cpu::{collect_cpu_info, CpuArch, CpuInfo};
 pub use gpu::{collect_gpu_info, GpuBackend, GpuInfo, GpuType, GpuVendor};
 pub use memory::{collect_memory_info, MemoryInfo};
-pub use models::{collect_local_models, LocalModelInfo};
+pub use models::{collect_online_models, OnlineModelCatalog};
 pub use platform::{collect_platform_info, PlatformInfo};
 pub use runtime::collect_runtime_availability;
 
@@ -32,8 +32,6 @@ pub struct HardwareInfo {
     pub platform: PlatformInfo,
     pub availability: Vec<EngineAvailability>,
     pub detection_warnings: Vec<String>,
-    pub local_models: Vec<LocalModelInfo>,
-    pub model_scan_warnings: Vec<String>,
 }
 
 impl HardwareInfo {
@@ -48,7 +46,6 @@ impl HardwareInfo {
         let memory = collect_memory_info(&sys);
         let platform = collect_platform_info();
         let availability = collect_runtime_availability(&gpus);
-        let model_result = collect_local_models(&memory, &gpus);
         let detection_warnings: Vec<String> = gpu_result.warning.into_iter().collect();
         let hw = Self {
             cpu,
@@ -57,8 +54,6 @@ impl HardwareInfo {
             platform,
             availability,
             detection_warnings,
-            local_models: model_result.models,
-            model_scan_warnings: model_result.warnings,
         };
         log::info!(
             "硬件检测完成: CPU={}, {} GPU(s), {} MB RAM",

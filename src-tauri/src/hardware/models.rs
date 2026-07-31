@@ -1,14 +1,17 @@
-//! Discover local Ollama and LM Studio model files and estimate whether they fit.
+//! Fetch public Ollama and LM Studio catalogs and estimate which models fit this machine.
 
-use super::{GpuInfo, GpuType, MemoryInfo};
+use super::{GpuInfo, GpuType, HardwareInfo, MemoryInfo};
+use regex::Regex;
+use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::collections::HashSet;
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::time::Duration;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum LocalModelSource {
+const OLLAMA_LIBRARY_URL: &str = "https://ollama.com/library";
+const LM_STUDIO_CATALOG_URL: &str = "https://lmstudio.ai/models";
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum OnlineModelSource {
     Ollama,
     LmStudio,
 }
@@ -18,288 +21,270 @@ pub enum ModelFit {
     Gpu,
     Hybrid,
     Cpu,
-    InsufficientMemory,
-    Unknown,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LocalModelInfo {
+pub struct OnlineModelInfo {
     pub name: String,
-    pub source: LocalModelSource,
-    pub path: String,
-    pub size_bytes: u64,
-    pub quantization: Option<String>,
+    pub source: OnlineModelSource,
+    pub parameter_label: String,
+    pub estimated_q4_gb: f64,
     pub fit: ModelFit,
     pub fit_reason: String,
+    pub url: String,
 }
 
-pub struct LocalModelDetectionResult {
-    pub models: Vec<LocalModelInfo>,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OnlineModelCatalog {
+    pub models: Vec<OnlineModelInfo>,
     pub warnings: Vec<String>,
 }
 
 #[must_use]
-pub fn collect_local_models(memory: &MemoryInfo, gpus: &[GpuInfo]) -> LocalModelDetectionResult {
+pub async fn collect_online_models(hw: &HardwareInfo) -> OnlineModelCatalog {
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .user_agent("Velox-Engine-Picker/0.1")
+        .build()
+    {
+        Ok(client) => client,
+        Err(error) => {
+            return OnlineModelCatalog {
+                models: Vec::new(),
+                warnings: vec![format!("在线模型客户端初始化失败: {error}")],
+            };
+        }
+    };
+
     let mut models = Vec::new();
     let mut warnings = Vec::new();
-    for root in ollama_roots() {
-        scan_ollama(&root, &mut models, &mut warnings);
+    match fetch_text(&client, OLLAMA_LIBRARY_URL).await {
+        Ok(html) => models.extend(parse_ollama_catalog(&html, &hw.memory, &hw.gpus)),
+        Err(error) => warnings.push(format!("Ollama 在线目录读取失败: {error}")),
     }
-    for root in lm_studio_roots() {
-        scan_lm_studio(&root, &mut models, &mut warnings);
+    match fetch_text(&client, LM_STUDIO_CATALOG_URL).await {
+        Ok(html) => models.extend(parse_lm_studio_catalog(&html, &hw.memory, &hw.gpus)),
+        Err(error) => warnings.push(format!("LM Studio 在线目录读取失败: {error}")),
     }
 
     let mut seen = HashSet::new();
-    models.retain(|model| seen.insert(model.path.to_ascii_lowercase()));
-    for model in &mut models {
-        let (fit, reason) = estimate_fit(model.size_bytes, memory, gpus);
-        model.fit = fit;
-        model.fit_reason = reason;
-    }
-    models.sort_by_key(|model| (fit_rank(&model.fit), model.size_bytes, model.name.clone()));
-    LocalModelDetectionResult { models, warnings }
+    models.retain(|model| {
+        seen.insert((
+            model.source.clone(),
+            model.name.to_ascii_lowercase(),
+            model.parameter_label.to_ascii_lowercase(),
+        ))
+    });
+    models.sort_by(|a, b| {
+        fit_rank(&a.fit)
+            .cmp(&fit_rank(&b.fit))
+            .then_with(|| a.estimated_q4_gb.total_cmp(&b.estimated_q4_gb))
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    models.truncate(80);
+    OnlineModelCatalog { models, warnings }
 }
 
-fn user_home() -> Option<PathBuf> {
-    std::env::var_os("USERPROFILE")
-        .or_else(|| std::env::var_os("HOME"))
-        .map(PathBuf::from)
+async fn fetch_text(client: &reqwest::Client, url: &str) -> Result<String, String> {
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("HTTP {}", response.status()));
+    }
+    response.text().await.map_err(|error| error.to_string())
 }
 
-fn dedupe_existing(paths: Vec<PathBuf>) -> Vec<PathBuf> {
-    let mut seen = HashSet::new();
-    paths
-        .into_iter()
-        .filter(|path| path.is_dir())
-        .filter(|path| seen.insert(path.to_string_lossy().to_ascii_lowercase()))
-        .collect()
-}
+fn parse_ollama_catalog(html: &str, memory: &MemoryInfo, gpus: &[GpuInfo]) -> Vec<OnlineModelInfo> {
+    let document = Html::parse_document(html);
+    let card_selector = Selector::parse("#repo li a[href^='/library/']").expect("valid selector");
+    let title_selector = Selector::parse("[title]").expect("valid selector");
+    let badge_selector = Selector::parse("span").expect("valid selector");
+    let mut models = Vec::new();
 
-fn ollama_roots() -> Vec<PathBuf> {
-    let mut roots = Vec::new();
-    if let Some(path) = std::env::var_os("OLLAMA_MODELS").filter(|value| !value.is_empty()) {
-        roots.push(PathBuf::from(path));
-    }
-    if let Some(home) = user_home() {
-        roots.push(home.join(".ollama").join("models"));
-    }
-    dedupe_existing(roots)
-}
-
-fn lm_studio_roots() -> Vec<PathBuf> {
-    let Some(home) = user_home() else {
-        return Vec::new();
-    };
-    let mut roots = Vec::new();
-    let settings = home.join(".lmstudio").join("settings.json");
-    if let Ok(text) = fs::read_to_string(settings) {
-        if let Ok(value) = serde_json::from_str::<Value>(&text) {
-            if let Some(folder) = value.get("downloadsFolder").and_then(Value::as_str) {
-                roots.push(PathBuf::from(folder));
-            }
-        }
-    }
-    roots.push(home.join(".lmstudio").join("models"));
-    dedupe_existing(roots)
-}
-
-fn scan_lm_studio(root: &Path, models: &mut Vec<LocalModelInfo>, warnings: &mut Vec<String>) {
-    let mut files = Vec::new();
-    if let Err(error) = walk_files(root, 0, 8, &mut files) {
-        warnings.push(format!("LM Studio 模型目录读取失败: {error}"));
-        return;
-    }
-    for path in files {
-        let name = path
-            .file_name()
-            .and_then(|part| part.to_str())
-            .unwrap_or_default();
-        let lower = name.to_ascii_lowercase();
-        if path
-            .extension()
-            .and_then(|part| part.to_str())
-            .is_none_or(|ext| !ext.eq_ignore_ascii_case("gguf"))
-            || lower.starts_with("mmproj-")
-            || lower.starts_with("mmproj_")
-            || lower.contains(".mmproj")
-        {
+    for card in document.select(&card_selector).take(40) {
+        let href = card.value().attr("href").unwrap_or_default();
+        let name = card
+            .select(&title_selector)
+            .find_map(|element| element.value().attr("title"))
+            .unwrap_or_else(|| href.trim_start_matches("/library/"));
+        if name.is_empty() {
             continue;
         }
-        if let Ok(metadata) = fs::metadata(&path) {
-            models.push(LocalModelInfo {
-                name: name.trim_end_matches(".gguf").to_string(),
-                source: LocalModelSource::LmStudio,
-                path: path.to_string_lossy().into_owned(),
-                size_bytes: metadata.len(),
-                quantization: infer_quantization(name),
-                fit: ModelFit::Unknown,
-                fit_reason: String::new(),
-            });
+        let labels = card
+            .select(&badge_selector)
+            .filter_map(|element| parse_parameter_label(&element.text().collect::<String>()))
+            .map(|(label, value)| (label, OrderedFloat(value)))
+            .collect::<HashSet<_>>();
+        for (label, parameters_b) in labels {
+            push_if_runnable(
+                &mut models,
+                name,
+                OnlineModelSource::Ollama,
+                &label,
+                parameters_b.0,
+                format!("https://ollama.com{href}"),
+                memory,
+                gpus,
+            );
         }
     }
+    models
 }
 
-fn scan_ollama(root: &Path, models: &mut Vec<LocalModelInfo>, warnings: &mut Vec<String>) {
-    let manifests = root.join("manifests");
-    if !manifests.is_dir() {
-        return;
-    }
-    let mut files = Vec::new();
-    if let Err(error) = walk_files(&manifests, 0, 8, &mut files) {
-        warnings.push(format!("Ollama 模型清单读取失败: {error}"));
-        return;
-    }
-    for manifest in files {
-        let Ok(text) = fs::read_to_string(&manifest) else {
+fn parse_lm_studio_catalog(
+    html: &str,
+    memory: &MemoryInfo,
+    gpus: &[GpuInfo],
+) -> Vec<OnlineModelInfo> {
+    let document = Html::parse_document(html);
+    let card_selector = Selector::parse("a[href^='/models/']").expect("valid selector");
+    let heading_selector =
+        Selector::parse("h1, h2, h3, h4, .text-lg.font-medium").expect("valid selector");
+    let mut models = Vec::new();
+
+    for card in document.select(&card_selector).take(40) {
+        let href = card.value().attr("href").unwrap_or_default();
+        let name = card
+            .select(&heading_selector)
+            .next()
+            .map(|heading| clean_text(&heading.text().collect::<Vec<_>>().join(" ")))
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| model_name_from_href(href));
+        if name.is_empty() {
             continue;
-        };
-        let Ok(value) = serde_json::from_str::<Value>(&text) else {
-            continue;
-        };
-        let Some(layer) = value
-            .get("layers")
-            .and_then(Value::as_array)
-            .and_then(|layers| {
-                layers.iter().find(|layer| {
-                    layer
-                        .get("mediaType")
-                        .and_then(Value::as_str)
-                        .is_some_and(|kind| kind.contains("image.model"))
-                })
+        }
+        let text = clean_text(&card.text().collect::<Vec<_>>().join(" "));
+        for (label, parameters_b) in extract_parameter_labels(&text) {
+            push_if_runnable(
+                &mut models,
+                &name,
+                OnlineModelSource::LmStudio,
+                &label,
+                parameters_b.0,
+                format!("https://lmstudio.ai{href}"),
+                memory,
+                gpus,
+            );
+        }
+    }
+    models
+}
+
+fn model_name_from_href(href: &str) -> String {
+    href.trim_start_matches("/models/")
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut characters = part.chars();
+            characters.next().map_or_else(String::new, |first| {
+                first.to_uppercase().collect::<String>() + characters.as_str()
             })
-        else {
-            continue;
-        };
-        let size = layer.get("size").and_then(Value::as_u64).unwrap_or(0);
-        let digest = layer
-            .get("digest")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        let blob = root.join("blobs").join(digest.replace(':', "-"));
-        let size_bytes = if size > 0 {
-            size
-        } else {
-            fs::metadata(&blob).map(|m| m.len()).unwrap_or(0)
-        };
-        let name = ollama_model_name(&manifests, &manifest);
-        models.push(LocalModelInfo {
-            quantization: infer_quantization(&name),
-            name,
-            source: LocalModelSource::Ollama,
-            path: manifest.to_string_lossy().into_owned(),
-            size_bytes,
-            fit: ModelFit::Unknown,
-            fit_reason: String::new(),
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_if_runnable(
+    models: &mut Vec<OnlineModelInfo>,
+    name: &str,
+    source: OnlineModelSource,
+    parameter_label: &str,
+    parameters_b: f64,
+    url: String,
+    memory: &MemoryInfo,
+    gpus: &[GpuInfo],
+) {
+    let estimated_q4_gb = parameters_b * 0.58 + 1.2;
+    if let Some((fit, fit_reason)) = estimate_fit(estimated_q4_gb, memory, gpus) {
+        models.push(OnlineModelInfo {
+            name: name.to_string(),
+            source,
+            parameter_label: parameter_label.to_string(),
+            estimated_q4_gb: (estimated_q4_gb * 10.0).round() / 10.0,
+            fit,
+            fit_reason,
+            url,
         });
     }
 }
 
-fn walk_files(
-    dir: &Path,
-    depth: usize,
-    max_depth: usize,
-    output: &mut Vec<PathBuf>,
-) -> std::io::Result<()> {
-    if depth > max_depth {
-        return Ok(());
-    }
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        let file_type = entry.file_type()?;
-        if file_type.is_dir() {
-            walk_files(&path, depth + 1, max_depth, output)?;
-        } else if file_type.is_file() {
-            output.push(path);
-        }
-    }
-    Ok(())
-}
-
-fn ollama_model_name(root: &Path, manifest: &Path) -> String {
-    let parts: Vec<_> = manifest
-        .strip_prefix(root)
-        .unwrap_or(manifest)
-        .components()
-        .map(|part| part.as_os_str().to_string_lossy().into_owned())
-        .collect();
-    if parts.len() >= 2 {
-        let tag = parts.last().cloned().unwrap_or_else(|| "latest".into());
-        let model = parts.get(parts.len() - 2).cloned().unwrap_or_default();
-        if parts.len() >= 3 && parts[parts.len() - 3] != "library" {
-            return format!("{}/{model}:{tag}", parts[parts.len() - 3]);
-        }
-        return format!("{model}:{tag}");
-    }
-    manifest
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("未知模型")
-        .to_string()
-}
-
-fn infer_quantization(name: &str) -> Option<String> {
-    let upper = name.to_ascii_uppercase();
-    const MARKERS: [&str; 11] = [
-        "Q2_K", "Q3_K", "Q4_0", "Q4_1", "Q4_K_M", "Q4_K_S", "Q5_K_M", "Q5_K_S", "Q6_K", "Q8_0",
-        "F16",
-    ];
-    MARKERS
-        .iter()
-        .find(|marker| upper.contains(**marker))
-        .map(|marker| (*marker).to_string())
-}
-
-fn estimate_fit(size_bytes: u64, memory: &MemoryInfo, gpus: &[GpuInfo]) -> (ModelFit, String) {
-    if size_bytes == 0 {
-        return (ModelFit::Unknown, "模型大小未知，无法估算".into());
-    }
-    let weight_mb = size_bytes.div_ceil(1024 * 1024);
-    let required_mb = weight_mb
-        .saturating_mul(120)
-        .div_ceil(100)
-        .saturating_add(1024);
-    let max_vram = gpus
+fn estimate_fit(
+    estimated_gb: f64,
+    memory: &MemoryInfo,
+    gpus: &[GpuInfo],
+) -> Option<(ModelFit, String)> {
+    let max_vram_gb = gpus
         .iter()
         .filter(|gpu| gpu.gpu_type == GpuType::Discrete)
         .filter_map(|gpu| gpu.vram)
-        .max();
-    if let Some(vram) = max_vram {
-        if required_mb <= vram.saturating_mul(9) / 10 {
-            return (
-                ModelFit::Gpu,
-                format!(
-                    "预计需约 {:.1} GB，适合完整载入显存",
-                    required_mb as f64 / 1024.0
-                ),
-            );
-        }
-        if required_mb <= memory.total.saturating_mul(3) / 4 + vram.saturating_mul(4) / 5 {
-            return (
+        .max()
+        .map(|mb| mb as f64 / 1024.0);
+    let memory_gb = memory.total as f64 / 1024.0;
+    if max_vram_gb.is_some_and(|vram| estimated_gb <= vram * 0.9) {
+        return Some((
+            ModelFit::Gpu,
+            format!("Q4 预计约 {estimated_gb:.1} GB，可完整载入独显"),
+        ));
+    }
+    if let Some(vram) = max_vram_gb {
+        if estimated_gb <= memory_gb * 0.7 + vram * 0.8 {
+            return Some((
                 ModelFit::Hybrid,
-                format!(
-                    "显存不足以完整载入；预计需约 {:.1} GB，可尝试 GPU 分层卸载 + 系统内存",
-                    required_mb as f64 / 1024.0
-                ),
-            );
+                format!("Q4 预计约 {estimated_gb:.1} GB，可尝试 GPU 分层卸载"),
+            ));
         }
     }
-    if required_mb <= memory.total.saturating_mul(3) / 4 {
-        return (
+    (estimated_gb <= memory_gb * 0.7).then(|| {
+        (
             ModelFit::Cpu,
-            format!(
-                "预计需约 {:.1} GB，可尝试 CPU / 系统内存运行",
-                required_mb as f64 / 1024.0
-            ),
-        );
+            format!("Q4 预计约 {estimated_gb:.1} GB，可尝试 CPU / 内存运行"),
+        )
+    })
+}
+
+fn parse_parameter_label(text: &str) -> Option<(String, f64)> {
+    let normalized = text.trim().to_ascii_lowercase();
+    let regex = Regex::new(r"^(?:(\d+(?:\.\d+)?)x)?(\d+(?:\.\d+)?)([bm])$").expect("valid regex");
+    let captures = regex.captures(&normalized)?;
+    let multiplier = captures
+        .get(1)
+        .map_or(1.0, |value| value.as_str().parse().unwrap_or(1.0));
+    let value: f64 = captures.get(2)?.as_str().parse().ok()?;
+    let unit = captures.get(3)?.as_str();
+    let parameters_b = multiplier * value * if unit == "m" { 0.001 } else { 1.0 };
+    (parameters_b >= 0.1).then(|| (normalized.to_ascii_uppercase(), parameters_b))
+}
+
+fn extract_parameter_labels(text: &str) -> HashSet<(String, OrderedFloat)> {
+    let regex = Regex::new(r"(?i)(?:\d+(?:\.\d+)?x)?\d+(?:\.\d+)?[bm]\b").expect("valid regex");
+    regex
+        .find_iter(text)
+        .filter_map(|matched| parse_parameter_label(matched.as_str()))
+        .map(|(label, value)| (label, OrderedFloat(value)))
+        .collect()
+}
+
+#[derive(Debug, Clone, Copy)]
+struct OrderedFloat(f64);
+
+impl PartialEq for OrderedFloat {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.to_bits() == other.0.to_bits()
     }
-    (
-        ModelFit::InsufficientMemory,
-        format!(
-            "预计需约 {:.1} GB，超过当前安全内存预算",
-            required_mb as f64 / 1024.0
-        ),
-    )
+}
+impl Eq for OrderedFloat {}
+impl std::hash::Hash for OrderedFloat {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.to_bits().hash(state);
+    }
+}
+
+fn clean_text(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn fit_rank(fit: &ModelFit) -> u8 {
@@ -307,8 +292,6 @@ fn fit_rank(fit: &ModelFit) -> u8 {
         ModelFit::Gpu => 0,
         ModelFit::Hybrid => 1,
         ModelFit::Cpu => 2,
-        ModelFit::Unknown => 3,
-        ModelFit::InsufficientMemory => 4,
     }
 }
 
@@ -317,54 +300,75 @@ mod tests {
     use super::*;
     use crate::hardware::{GpuBackend, GpuVendor};
 
-    fn gpu(vram: u64) -> GpuInfo {
-        GpuInfo {
-            name: "Test GPU".into(),
-            vendor: GpuVendor::Nvidia,
-            gpu_type: GpuType::Discrete,
-            vram: Some(vram),
-            backend: GpuBackend::Dx12,
-            device_id: (1, 1),
-        }
+    fn hardware() -> (MemoryInfo, Vec<GpuInfo>) {
+        (
+            MemoryInfo {
+                total: 32768,
+                available: 16000,
+            },
+            vec![GpuInfo {
+                name: "RTX".into(),
+                vendor: GpuVendor::Nvidia,
+                gpu_type: GpuType::Discrete,
+                vram: Some(8192),
+                backend: GpuBackend::Dx12,
+                device_id: (1, 1),
+            }],
+        )
     }
 
     #[test]
-    fn small_model_fits_gpu() {
-        assert_eq!(
-            estimate_fit(
-                3 * 1024 * 1024 * 1024,
-                &MemoryInfo {
-                    total: 32768,
-                    available: 20000
-                },
-                &[gpu(8192)]
+    fn parses_ollama_cards_and_filters_oversized_variants() {
+        let (memory, gpus) = hardware();
+        let html = r#"<div id='repo'><li><a href='/library/qwen'><div title='qwen'></div><span>4b</span><span>72b</span></a></li></div>"#;
+        let models = parse_ollama_catalog(html, &memory, &gpus);
+        assert!(models.iter().any(|model| model.parameter_label == "4B"));
+        assert!(!models.iter().any(|model| model.parameter_label == "72B"));
+    }
+
+    #[test]
+    fn parses_moe_parameter_label() {
+        assert_eq!(parse_parameter_label("8x7b").map(|item| item.1), Some(56.0));
+    }
+
+    #[test]
+    fn parses_lm_studio_cards() {
+        let (memory, gpus) = hardware();
+        let html = r#"<a href='/models/granite'><h3>Granite 4.1</h3><span>3B</span><span>8B</span><p>16.9K downloads</p></a>"#;
+        let models = parse_lm_studio_catalog(html, &memory, &gpus);
+        assert!(models
+            .iter()
+            .any(|model| model.name == "Granite 4.1" && model.parameter_label == "3B"));
+        assert!(models.iter().any(|model| model.parameter_label == "8B"));
+    }
+
+    #[test]
+    #[ignore = "requires access to official online catalogs"]
+    fn live_official_catalogs_return_runnable_models() {
+        let (memory, gpus) = hardware();
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(20))
+            .user_agent("Velox-Engine-Picker/catalog-smoke-test")
+            .build()
+            .expect("client");
+        let (ollama_html, lm_studio_html) = tauri::async_runtime::block_on(async {
+            (
+                fetch_text(&client, OLLAMA_LIBRARY_URL)
+                    .await
+                    .expect("Ollama catalog"),
+                fetch_text(&client, LM_STUDIO_CATALOG_URL)
+                    .await
+                    .expect("LM Studio catalog"),
             )
-            .0,
-            ModelFit::Gpu
+        });
+        let ollama = parse_ollama_catalog(&ollama_html, &memory, &gpus);
+        let lm_studio = parse_lm_studio_catalog(&lm_studio_html, &memory, &gpus);
+        eprintln!(
+            "Ollama runnable variants: {}, LM Studio runnable variants: {}",
+            ollama.len(),
+            lm_studio.len()
         );
-    }
-
-    #[test]
-    fn large_model_uses_hybrid_memory() {
-        assert_eq!(
-            estimate_fit(
-                17 * 1024 * 1024 * 1024,
-                &MemoryInfo {
-                    total: 32768,
-                    available: 20000
-                },
-                &[gpu(8192)]
-            )
-            .0,
-            ModelFit::Hybrid
-        );
-    }
-
-    #[test]
-    fn excludes_projection_marker_from_quantization_parsing() {
-        assert_eq!(
-            infer_quantization("Qwen3-8B-Q4_K_M.gguf").as_deref(),
-            Some("Q4_K_M")
-        );
+        assert!(!ollama.is_empty());
+        assert!(!lm_studio.is_empty());
     }
 }

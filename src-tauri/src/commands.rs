@@ -7,7 +7,7 @@
 
 use crate::engine::types::EngineRecommendation;
 use crate::engine::{merge_recommendations, recommend};
-use crate::hardware::HardwareInfo;
+use crate::hardware::{collect_online_models, HardwareInfo, OnlineModelCatalog};
 use serde::Serialize;
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -48,6 +48,11 @@ pub async fn detect_hardware() -> Result<HardwareInfo, DetectionError> {
             code: "DETECTION_TASK_FAILED",
             message: error.to_string(),
         })?
+}
+
+#[tauri::command]
+pub async fn get_online_models(hw: HardwareInfo) -> Result<OnlineModelCatalog, String> {
+    Ok(collect_online_models(&hw).await)
 }
 
 #[cfg(test)]

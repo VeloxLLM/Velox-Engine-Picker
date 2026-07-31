@@ -56,21 +56,24 @@ export interface HardwareInfo {
   platform: PlatformInfo;
   availability: EngineAvailability[];
   detection_warnings: string[];
-  local_models: LocalModelInfo[];
-  model_scan_warnings: string[];
 }
 
-export type LocalModelSource = "Ollama" | "LmStudio";
-export type ModelFit = "Gpu" | "Hybrid" | "Cpu" | "InsufficientMemory" | "Unknown";
+export type OnlineModelSource = "Ollama" | "LmStudio";
+export type ModelFit = "Gpu" | "Hybrid" | "Cpu";
 
-export interface LocalModelInfo {
+export interface OnlineModelInfo {
   name: string;
-  source: LocalModelSource;
-  path: string;
-  size_bytes: number;
-  quantization: string | null;
+  source: OnlineModelSource;
+  parameter_label: string;
+  estimated_q4_gb: number;
   fit: ModelFit;
   fit_reason: string;
+  url: string;
+}
+
+export interface OnlineModelCatalog {
+  models: OnlineModelInfo[];
+  warnings: string[];
 }
 
 export interface PlatformInfo {

@@ -10,15 +10,12 @@ const hw: HardwareInfo = {
   platform: { os: "windows", arch: "x86_64", edition: "v1", support_level: "Stable" },
   availability: [],
   detection_warnings: [],
-  local_models: [{ name: "Qwen-Test-Q4_K_M", source: "LmStudio", path: "C:\\models\\qwen.gguf", size_bytes: 4 * 1024 ** 3, quantization: "Q4_K_M", fit: "Gpu", fit_reason: "适合完整载入显存" }],
-  model_scan_warnings: [],
 };
 
 describe("HardwarePanel", () => {
-  it("shows explicit iGPU status and discovered local models", () => {
+  it("shows one dGPU detail and an explicit iGPU status", () => {
     render(<HardwarePanel hw={hw} />);
-    expect(screen.getByText(/未检测到 iGPU/)).toBeTruthy();
-    expect(screen.getByText("Qwen-Test-Q4_K_M")).toBeTruthy();
-    expect(screen.getByText("适合 GPU")).toBeTruthy();
+    expect(screen.getByText(/iGPU 检测：未检测到/)).toBeTruthy();
+    expect(screen.getAllByText("NVIDIA GPU")).toHaveLength(1);
   });
 });

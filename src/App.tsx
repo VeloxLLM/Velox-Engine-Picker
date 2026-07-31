@@ -2,9 +2,10 @@ import { useState } from "react";
 import { useHardwareDetection } from "./hooks/useHardwareDetection";
 import HardwarePanel from "./components/HardwarePanel";
 import RecommendationPanel from "./components/RecommendationPanel";
+import OnlineModelsPanel from "./components/OnlineModelsPanel";
 import "./App.css";
 
-type Tab = "recommendation" | "hardware";
+type Tab = "recommendation" | "hardware" | "models";
 
 function App() {
   const [tab, setTab] = useState<Tab>("recommendation");
@@ -40,6 +41,12 @@ function App() {
           >
             硬件信息
           </button>
+          <button
+            className={`tab-btn ${tab === "models" ? "active" : ""}`}
+            onClick={() => setTab("models")}
+          >
+            在线模型
+          </button>
           <div className="sidebar-footer">
             <small>VeloxLLM v0.1.0</small>
           </div>
@@ -64,6 +71,8 @@ function App() {
             ) : hw && rec ? (
               tab === "hardware" ? (
                 <HardwarePanel hw={hw} />
+              ) : tab === "models" ? (
+                <OnlineModelsPanel hw={hw} />
               ) : (
                 <RecommendationPanel hw={hw} rec={rec} />
               )

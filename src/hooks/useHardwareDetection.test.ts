@@ -21,8 +21,6 @@ const hardware = {
   platform: { os: "windows", arch: "x86_64", edition: "v1", support_level: "Stable" },
   availability: [],
   detection_warnings: [],
-  local_models: [],
-  model_scan_warnings: [],
 };
 
 const recommendation = {

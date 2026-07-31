@@ -134,7 +134,7 @@ function RecommendationPanelInner({ hw, rec }: Props) {
           <span style={MUTED_STYLE}>（无）</span>
         ) : (
           <div className="table-grid">
-            <div className="table-row header">
+            <div className="table-row cheat-table-row header">
               <span>#</span>
               <span>引擎</span>
               <span>后端</span>
@@ -143,7 +143,7 @@ function RecommendationPanelInner({ hw, rec }: Props) {
             {rec.alternatives.map((a, i) => {
               const color = BACKEND_COLORS[a.backend];
               return (
-                <div className="table-row striped" key={i}>
+                <div className="table-row cheat-table-row striped" key={i}>
                   <span style={{ color, fontWeight: 600 }}>{i + 1}</span>
                   <span style={{ fontWeight: 600 }}>{ENGINE_NAMES[a.engine]}</span>
                   <span style={{ color }}>{BACKEND_NAMES[a.backend]}</span>
