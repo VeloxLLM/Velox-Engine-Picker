@@ -12,6 +12,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::detect_hardware,
             commands::get_recommendation,
+            commands::merge_recommendations_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -63,9 +63,11 @@ export interface EngineRecommendation {
   alternatives: EngineBackendPair[];
   reasons: string[];
   memory_tip: string | null;
+  session_id: string;
+  session_ts: number;
 }
 
-// 帮组函数：引擎/后端显示名
+// 辅助函数：引擎/后端显示名
 export const ENGINE_NAMES: Record<InferenceEngine, string> = {
   OpenVino: "OpenVINO",
   LlamaCpp: "llama.cpp",

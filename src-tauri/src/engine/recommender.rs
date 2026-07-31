@@ -177,6 +177,11 @@ pub fn recommend(hw: &HardwareInfo) -> EngineRecommendation {
         alternatives: dedup_alternatives,
         reasons,
         memory_tip,
+        session_id: uuid::Uuid::new_v4().to_string(),
+        session_ts: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
     }
 }
 
@@ -223,6 +228,52 @@ fn build_memory_tip(hw: &HardwareInfo) -> Option<String> {
     } else {
         Some(tips.join("；"))
     }
+}
+
+/// 合并多次检测的推荐结果
+///
+/// 规则：
+/// - primary 取最新一次的结果
+/// - alternatives 去重合并（按出现顺序保留首次出现的）
+/// - reasons 去重合并（按出现顺序保留首次出现的）
+/// - memory_tip 取最新一次的结果
+/// - session_id 重新生成，session_ts 取最新一次的时间戳
+#[must_use]
+pub fn merge_recommendations(recs: &[EngineRecommendation]) -> Option<EngineRecommendation> {
+    if recs.is_empty() {
+        return None;
+    }
+
+    let latest = recs.last().unwrap();
+
+    // 去重合并 alternatives
+    let mut seen_pairs: Vec<EngineBackendPair> = Vec::new();
+    for r in recs {
+        for alt in &r.alternatives {
+            if !seen_pairs.contains(alt) {
+                seen_pairs.push(*alt);
+            }
+        }
+    }
+
+    // 去重合并 reasons
+    let mut seen_reasons: Vec<String> = Vec::new();
+    for r in recs {
+        for reason in &r.reasons {
+            if !seen_reasons.contains(reason) {
+                seen_reasons.push(reason.clone());
+            }
+        }
+    }
+
+    Some(EngineRecommendation {
+        primary: latest.primary,
+        alternatives: seen_pairs,
+        reasons: seen_reasons,
+        memory_tip: latest.memory_tip.clone(),
+        session_id: uuid::Uuid::new_v4().to_string(),
+        session_ts: latest.session_ts,
+    })
 }
 
 #[cfg(test)]

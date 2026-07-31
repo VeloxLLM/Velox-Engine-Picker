@@ -10,11 +10,11 @@ pub use cpu::{collect_cpu_info, CpuArch, CpuBrand, CpuInfo};
 pub use gpu::{collect_gpu_info, GpuBackend, GpuInfo, GpuType, GpuVendor};
 pub use memory::{collect_memory_info, MemoryInfo};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// 汇总的硬件信息
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HardwareInfo {
     pub cpu: CpuInfo,
     pub memory: MemoryInfo,
@@ -24,11 +24,15 @@ pub struct HardwareInfo {
 impl HardwareInfo {
     /// 采集所有硬件信息
     pub fn collect() -> Self {
-        Self {
-            cpu: collect_cpu_info(),
-            memory: collect_memory_info(),
-            gpus: collect_gpu_info(),
-        }
+        log::info!("开始硬件检测...");
+        let mut sys = sysinfo::System::new();
+        sys.refresh_all();
+        let cpu = collect_cpu_info(&sys);
+        let gpus = collect_gpu_info();
+        let memory = collect_memory_info(&sys);
+        let hw = Self { cpu, gpus, memory };
+        log::info!("硬件检测完成: CPU={}, {} GPU(s), {} MB RAM", hw.cpu.name, hw.gpus.len(), hw.memory.total);
+        hw
     }
 
     /// 是否检测到独立显卡

@@ -1,16 +1,35 @@
 //! CPU 信息检测
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sysinfo::System;
 
 /// CPU 指令集架构
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
 pub enum CpuArch {
     X86_64,
     Aarch64,
     Arm,
     X86,
     Other,
+}
+
+impl From<CpuArch> for String {
+    fn from(v: CpuArch) -> String {
+        format!("{:?}", v)
+    }
+}
+
+impl From<String> for CpuArch {
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "X86_64" => Self::X86_64,
+            "Aarch64" => Self::Aarch64,
+            "Arm" => Self::Arm,
+            "X86" => Self::X86,
+            _ => Self::Other,
+        }
+    }
 }
 
 impl CpuArch {
@@ -31,7 +50,7 @@ impl CpuArch {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CpuInfo {
     pub name: String,
     pub vendor: String,
@@ -41,7 +60,8 @@ pub struct CpuInfo {
     pub arch: CpuArch,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
 pub enum CpuBrand {
     Intel,
     Amd,
@@ -50,12 +70,27 @@ pub enum CpuBrand {
     Other,
 }
 
+impl From<CpuBrand> for String {
+    fn from(v: CpuBrand) -> String {
+        format!("{:?}", v)
+    }
+}
+
+impl From<String> for CpuBrand {
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "Intel" => Self::Intel,
+            "Amd" => Self::Amd,
+            "Apple" => Self::Apple,
+            "Qualcomm" => Self::Qualcomm,
+            _ => Self::Other,
+        }
+    }
+}
+
 /// 采集 CPU 信息
 #[must_use]
-pub fn collect_cpu_info() -> CpuInfo {
-    let mut sys = System::new();
-    sys.refresh_cpu_all();
-
+pub fn collect_cpu_info(sys: &System) -> CpuInfo {
     let cpus = sys.cpus();
     let core_count = cpus.len().max(1);
 

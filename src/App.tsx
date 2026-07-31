@@ -1,6 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import type { HardwareInfo, EngineRecommendation } from "./types";
+import { useState } from "react";
+import { useHardwareDetection } from "./hooks/useHardwareDetection";
 import HardwarePanel from "./components/HardwarePanel";
 import RecommendationPanel from "./components/RecommendationPanel";
 import "./App.css";
@@ -9,31 +8,7 @@ type Tab = "recommendation" | "hardware";
 
 function App() {
   const [tab, setTab] = useState<Tab>("recommendation");
-  const [hw, setHw] = useState<HardwareInfo | null>(null);
-  const [rec, setRec] = useState<EngineRecommendation | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const detect = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [hardware, recommendation] = await Promise.all([
-        invoke<HardwareInfo>("detect_hardware"),
-        invoke<EngineRecommendation>("get_recommendation"),
-      ]);
-      setHw(hardware);
-      setRec(recommendation);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    detect();
-  }, [detect]);
+  const { hw, rec, loading, error, redetect } = useHardwareDetection();
 
   return (
     <div className="app">
@@ -44,7 +19,7 @@ function App() {
           v1 &middot; Windows only
         </span>
         <div className="top-right">
-          <button className="btn btn-primary" onClick={detect} disabled={loading}>
+          <button className="btn btn-primary" onClick={redetect} disabled={loading}>
             {loading ? "检测中..." : "重新检测"}
           </button>
         </div>
@@ -72,21 +47,36 @@ function App() {
 
         <main className="content">
           <div className="content-inner">
-            {error && (
-              <div className="error-banner">
-                检测失败：{error}
-              </div>
-            )}
-
             {loading ? (
-              <div className="loading">正在检测硬件信息...</div>
+              <div className="loading">
+                <div className="loading-spinner" />
+                <p>正在检测硬件信息...</p>
+              </div>
+            ) : error ? (
+              <div className="empty-state">
+                <div className="empty-icon">⚠️</div>
+                <h3>检测失败</h3>
+                <p className="error-detail">{error}</p>
+                <button className="btn btn-primary" onClick={redetect}>
+                  重新尝试
+                </button>
+              </div>
             ) : hw && rec ? (
               tab === "hardware" ? (
                 <HardwarePanel hw={hw} />
               ) : (
                 <RecommendationPanel hw={hw} rec={rec} />
               )
-            ) : null}
+            ) : (
+              <div className="empty-state">
+                <div className="empty-icon">🔍</div>
+                <h3>准备就绪</h3>
+                <p>点击按钮开始检测本机硬件配置并获取引擎推荐</p>
+                <button className="btn btn-primary" onClick={redetect}>
+                  开始检测
+                </button>
+              </div>
+            )}
           </div>
         </main>
       </div>

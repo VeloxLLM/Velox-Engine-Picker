@@ -1,9 +1,10 @@
 //! GPU / iGPU 信息检测（基于 wgpu 适配器枚举）
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
 pub enum GpuVendor {
     Nvidia,
     Amd,
@@ -12,6 +13,26 @@ pub enum GpuVendor {
     Qualcomm,
     Microsoft,
     Other,
+}
+
+impl From<GpuVendor> for String {
+    fn from(v: GpuVendor) -> String {
+        format!("{:?}", v)
+    }
+}
+
+impl From<String> for GpuVendor {
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "Nvidia" => Self::Nvidia,
+            "Amd" => Self::Amd,
+            "Intel" => Self::Intel,
+            "Apple" => Self::Apple,
+            "Qualcomm" => Self::Qualcomm,
+            "Microsoft" => Self::Microsoft,
+            _ => Self::Other,
+        }
+    }
 }
 
 impl fmt::Display for GpuVendor {
@@ -28,11 +49,28 @@ impl fmt::Display for GpuVendor {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
 pub enum GpuType {
     Discrete,
     Integrated,
     Other,
+}
+
+impl From<GpuType> for String {
+    fn from(v: GpuType) -> String {
+        format!("{:?}", v)
+    }
+}
+
+impl From<String> for GpuType {
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "Discrete" => Self::Discrete,
+            "Integrated" => Self::Integrated,
+            _ => Self::Other,
+        }
+    }
 }
 
 impl fmt::Display for GpuType {
@@ -45,7 +83,8 @@ impl fmt::Display for GpuType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
 pub enum GpuBackend {
     Vulkan,
     Metal,
@@ -54,6 +93,26 @@ pub enum GpuBackend {
     Gl,
     BrowserWebGpu,
     Other,
+}
+
+impl From<GpuBackend> for String {
+    fn from(v: GpuBackend) -> String {
+        format!("{:?}", v)
+    }
+}
+
+impl From<String> for GpuBackend {
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "Vulkan" => Self::Vulkan,
+            "Metal" => Self::Metal,
+            "Dx12" => Self::Dx12,
+            "Dx11" => Self::Dx11,
+            "Gl" => Self::Gl,
+            "BrowserWebGpu" => Self::BrowserWebGpu,
+            _ => Self::Other,
+        }
+    }
 }
 
 impl fmt::Display for GpuBackend {
@@ -70,7 +129,7 @@ impl fmt::Display for GpuBackend {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GpuInfo {
     pub name: String,
     pub vendor: GpuVendor,
@@ -84,7 +143,10 @@ pub struct GpuInfo {
 pub fn collect_gpu_info() -> Vec<GpuInfo> {
     match pollster::block_on(try_collect_gpu_info()) {
         Some(gpus) if !gpus.is_empty() => gpus,
-        _ => Vec::new(),
+        _ => {
+            log::warn!("GPU 信息检测失败");
+            Vec::new()
+        }
     }
 }
 
@@ -109,6 +171,7 @@ async fn try_collect_gpu_info() -> Option<Vec<GpuInfo>> {
     let adapters: Vec<_> = instance.enumerate_adapters(selected_backends).collect();
 
     if adapters.is_empty() {
+        log::warn!("wgpu 未枚举到任何图形适配器");
         return None;
     }
 

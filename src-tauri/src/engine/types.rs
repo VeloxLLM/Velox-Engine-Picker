@@ -1,9 +1,10 @@
 //! 推理引擎类型定义
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
 pub enum InferenceEngine {
     OpenVino,
     LlamaCpp,
@@ -11,6 +12,26 @@ pub enum InferenceEngine {
     TensorRT,
     ROCm,
     DirectML,
+}
+
+impl From<InferenceEngine> for String {
+    fn from(v: InferenceEngine) -> String {
+        format!("{:?}", v)
+    }
+}
+
+impl From<String> for InferenceEngine {
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "OpenVino" => Self::OpenVino,
+            "LlamaCpp" => Self::LlamaCpp,
+            "OnnxRuntime" => Self::OnnxRuntime,
+            "TensorRT" => Self::TensorRT,
+            "ROCm" => Self::ROCm,
+            "DirectML" => Self::DirectML,
+            _ => Self::OpenVino,
+        }
+    }
 }
 
 impl InferenceEngine {
@@ -57,7 +78,8 @@ impl fmt::Display for InferenceEngine {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
 pub enum BackendType {
     Cpu,
     OpenVinoGpu,
@@ -67,6 +89,28 @@ pub enum BackendType {
     DirectML,
     Metal,
     Vulkan,
+}
+
+impl From<BackendType> for String {
+    fn from(v: BackendType) -> String {
+        format!("{:?}", v)
+    }
+}
+
+impl From<String> for BackendType {
+    fn from(s: String) -> Self {
+        match s.as_str() {
+            "Cpu" => Self::Cpu,
+            "OpenVinoGpu" => Self::OpenVinoGpu,
+            "Cuda" => Self::Cuda,
+            "TensorRT" => Self::TensorRT,
+            "Rocm" => Self::Rocm,
+            "DirectML" => Self::DirectML,
+            "Metal" => Self::Metal,
+            "Vulkan" => Self::Vulkan,
+            _ => Self::Cpu,
+        }
+    }
 }
 
 impl BackendType {
@@ -101,7 +145,7 @@ impl fmt::Display for BackendType {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EngineBackendPair {
     pub engine: InferenceEngine,
     pub backend: BackendType,
@@ -120,10 +164,12 @@ impl fmt::Display for EngineBackendPair {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EngineRecommendation {
     pub primary: EngineBackendPair,
     pub alternatives: Vec<EngineBackendPair>,
     pub reasons: Vec<String>,
     pub memory_tip: Option<String>,
+    pub session_id: String,
+    pub session_ts: u64,
 }
